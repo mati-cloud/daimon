@@ -15,7 +15,7 @@ Three processes, one WebSocket.
 └────────────┬─────────────────────────────────────────────────┘
              │ PTY
              ▼
-   zsh + shell integration ──calls──▶ daimon CLI (Rust) ──▶ OSC 133 markers
+   shell + integration ──calls──▶ daimon CLI (Rust) ──▶ OSC 133 markers
 ```
 
 ## Parts
@@ -27,7 +27,7 @@ Three processes, one WebSocket.
 | daimon-complete | Rust, serde_yaml, git2 | completion engine driven by YAML specs |
 | daimon CLI | Rust, git2 | shell hooks (`precmd`, `preexec`), `setup`, `shell-profiling` |
 | win-backdrop | Rust, `windows` crate | Windows-only DLL: variable-radius desktop blur |
-| shell integration | zsh | hooks that call the CLI; a pure-zsh variant for SSH remotes |
+| shell integration | zsh, bash, fish | hooks that call the CLI; a pure-zsh variant for SSH remotes |
 | app shell | Electrobun, Bun, `bun:ffi` | window, app menu, daemon lifecycle, native window tweaks |
 | UI | React 19, Vite, Tailwind 4, TanStack Router, Radix/shadcn, wraithterm | everything you see |
 
@@ -74,7 +74,7 @@ Font size, window opacity/blur and the markdown-preview toggle are kept in the w
 
 How daimon knows where a command starts and ends:
 
-1. The daemon starts zsh with its own `ZDOTDIR`. That startup file sources the user's real `~/.zshrc`, then daimon's hooks. It also defines a `daimon` function, so the CLI works at the prompt without being on `PATH`.
+1. The daemon starts the user's `$SHELL` (zsh, bash or fish; otherwise zsh, then bash) as a login shell, so the user's profile files set `PATH` as in any terminal. Each shell gets daimon's hooks its own way: zsh through a `ZDOTDIR` whose startup files (`.zshenv`, `.zprofile`, `.zshrc`, `.zlogin`) source the user's real ones; bash through `--posix` and `ENV=daimon.bash`, which runs the login files itself; fish through `XDG_DATA_DIRS`, which makes it load `vendor_conf.d/daimon.fish`. The integration also defines a `daimon` function, so the CLI works at the prompt without being on `PATH`.
 2. Two hooks are registered:
    - `preexec` → `daimon preexec` prints `OSC 133;C` (command started)
    - `precmd` → `daimon precmd` prints `OSC 133;A{json}` (prompt ready) with cwd, exit code, git state (libgit2, no subprocess), k8s and OpenStack context
@@ -156,6 +156,6 @@ The daemon itself is Unix-only.
 ## Known limits
 
 - The daemon locates the shell integration and the debug CLI relative to the source checkout, fixed at compile time. A production build still needs the checkout in place, and `daimon` on `PATH` if there is no debug build.
-- Command blocks need zsh, locally and on SSH remotes.
+- Command blocks need zsh, bash or fish locally, and zsh on SSH remotes.
 - TUI programs need a webview with WebGPU.
 - Images inside TUI programs: the daemon still rewrites kitty graphics to OSC 1337 (done for xterm.js's image addon). Wraith's docs list kitty graphics but not OSC 1337, so these images likely don't show in the terminal. Images in normal blocks are unaffected.

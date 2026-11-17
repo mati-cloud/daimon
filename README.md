@@ -33,7 +33,7 @@ A fast, minimal terminal with a smart shell that understands what you're doing �
 - **React + Vite + Tailwind** — UI
 - **wraithterm** — terminal for TUI apps: `libghostty-vt` + Rust WebGPU renderer in one Wasm module (replaces xterm.js; needs WebGPU in the webview)
 - **Electrobun** — app shell (Bun main process + system webview: WKWebView / WebKitGTK / WebView2)
-- **zsh** — shell integration via OSC 133 markers
+- **zsh, bash, fish** — shell integration via OSC 133 markers
 
 Details: [ARCHITECTURE.md](ARCHITECTURE.md)
 
@@ -68,7 +68,7 @@ Builds release binaries, the UI bundle and a stable Electrobun app for this mach
 
 ### Prerequisites
 
-All platforms: [Rust](https://rustup.rs) (stable, ≥ 1.86), [Bun](https://bun.sh), Node, and `zsh` (shell integration relies on it).
+All platforms: [Rust](https://rustup.rs) (stable, ≥ 1.86), [Bun](https://bun.sh), and Node.
 
 - **macOS** — `xcode-select --install`
 - **Linux (Debian/Ubuntu)** —
@@ -85,7 +85,7 @@ All platforms: [Rust](https://rustup.rs) (stable, ≥ 1.86), [Bun](https://bun.s
 
 | variable | effect |
 |----------|--------|
-| `DAIMON_SHELL` | shell to run instead of zsh (no command blocks without zsh) |
+| `DAIMON_SHELL` | shell to run instead of `$SHELL` (no command blocks unless zsh, bash or fish) |
 | `DAIMON_PORT` | daemon port (default `7878`, `dev.sh` uses `7877`) |
 | `DAIMON_PERSIST=0` | production: daemon and sessions end with the app |
 | `DAIMON_WINDOWS=0` | WSL2: use the WSLg window instead of the native Windows one |

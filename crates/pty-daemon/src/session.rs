@@ -2,6 +2,7 @@
 /// No shared mutable state between sessions — the compiler enforces this.
 
 use anyhow::{Context, Result};
+use crate::integration::Shell;
 use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use serde::{Deserialize, Serialize};
 use shell_parser::{is_alt_screen_enter, is_command_start_marker, is_prompt_marker, strip_osc133, strip_pty_modes};
@@ -118,26 +119,30 @@ pub enum SessionCommand {
 
 fn default_exec_timeout() -> u64 { 10_000 }
 
-/// Pick the shell to run. Daimon's OSC 133 integration is loaded via ZDOTDIR,
-/// which only zsh honours — so prefer zsh even when $SHELL is something else
-/// (e.g. bash, the default on most Linux/WSL distros). Override with DAIMON_SHELL.
-fn pick_shell() -> String {
+/// Pick the shell to run: the user's $SHELL if daimon has integration for it (zsh, bash,
+/// fish), else zsh, else bash, since without integration there are no blocks.
+/// DAIMON_SHELL overrides it, integration or not.
+fn pick_shell() -> (String, Option<Shell>) {
     if let Ok(s) = std::env::var("DAIMON_SHELL") {
-        return s;
+        let kind = Shell::of(&s);
+        return (s, kind);
     }
-    let env_shell = std::env::var("SHELL").ok();
+    let env_shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty());
     if let Some(s) = &env_shell {
-        if s.ends_with("/zsh") {
-            return s.clone();
+        if let Some(kind) = Shell::of(s) {
+            return (s.clone(), Some(kind));
         }
     }
-    for p in ["/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh", "/opt/homebrew/bin/zsh"] {
-        if std::path::Path::new(p).exists() {
-            return p.into();
-        }
+    let fallbacks = [
+        "/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh", "/opt/homebrew/bin/zsh",
+        "/bin/bash", "/usr/bin/bash",
+    ];
+    if let Some(p) = fallbacks.iter().find(|p| std::path::Path::new(p).exists()) {
+        tracing::info!("$SHELL {env_shell:?} has no daimon integration — using {p}");
+        return (p.to_string(), Shell::of(p));
     }
-    tracing::warn!("zsh not found — falling back to $SHELL; shell integration will be unavailable");
-    env_shell.unwrap_or_else(|| "/bin/sh".into())
+    tracing::warn!("neither zsh nor bash found — falling back to $SHELL; shell integration will be unavailable");
+    (env_shell.unwrap_or_else(|| "/bin/sh".into()), None)
 }
 
 /// What a reconnecting UI needs to pick a session back up (see `Session::attach`).
@@ -320,7 +325,7 @@ impl Session {
             .openpty(PtySize { rows: 24, cols: 120, pixel_width: 0, pixel_height: 0 })
             .context("openpty failed")?;
 
-        let shell = pick_shell();
+        let (shell, kind) = pick_shell();
         let mut cmd = CommandBuilder::new(&shell);
         if let Some(home) = dirs::home_dir() {
             cmd.cwd(home);
@@ -342,14 +347,8 @@ impl Session {
         if std::env::var_os("CLAUDECODE").is_some() {
             cmd.env_remove("GIT_EDITOR");
         }
-        // ZDOTDIR → our integration dir, which sources ~/.zshrc and adds the OSC 133 hooks;
-        // DAIMON_BIN → the CLI those hooks call (see integration.rs).
-        if let Some(dir) = crate::integration::zdotdir() {
-            cmd.env("ZDOTDIR", dir);
-        }
-        if let Some(bin) = crate::integration::cli_bin() {
-            cmd.env("DAIMON_BIN", bin);
-        }
+        // Login shell + daimon's OSC 133 hooks (see integration.rs).
+        crate::integration::configure(&mut cmd, kind);
 
         let mut child = pair.slave.spawn_command(cmd).context("spawn shell failed")?;
         let writer: Box<dyn Write + Send> = pair.master.take_writer().context("take_writer")?;
@@ -503,14 +502,12 @@ impl Session {
 }
 
 fn extract_context_json(data: &str) -> Option<String> {
-    // OSC 133;C<json>BEL or OSC 133;A<json>BEL
-    let start = data.find("\x1b]133;")?;
-    let rest = &data[start + 6..];
-    let end = rest.find('\x07').or_else(|| rest.find("\x1b\\"))?;
-    let payload = &rest[..end];
-    // payload starts with 'A' or 'C', json follows
-    let json_start = payload.find('{').or_else(|| payload.find('['))?;
-    Some(payload[json_start..].to_string())
+    // Daimon's OSC 133;A<json>ST (fish's own `133;A;…` marks carry none). JSON strings
+    // can't hold raw control characters, so the first BEL or ESC ends it.
+    let start = data.find(shell_parser::PROMPT_MARKER)? + shell_parser::PROMPT_MARKER.len() - 1;
+    let rest = &data[start..];
+    let end = rest.find(['\x07', '\x1b'])?;
+    Some(rest[..end].to_string())
 }
 
 /// Manager: owns all sessions for all tabs.
