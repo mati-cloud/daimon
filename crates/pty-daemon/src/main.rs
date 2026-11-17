@@ -1,6 +1,7 @@
 mod commands;
 mod complete;
 mod daemon_info;
+mod integration;
 mod kitty_graphics;
 mod link_preview;
 mod plugins;
