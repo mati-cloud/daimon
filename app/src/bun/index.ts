@@ -1,3 +1,4 @@
+import "./linuxEnv"; // first: sets WebKitGTK env vars before electrobun loads
 import { BrowserWindow, ApplicationMenu } from "electrobun/bun";
 import { openExternal } from "electrobun/bun/utils";
 import { connectDaemon } from "./daemon";
