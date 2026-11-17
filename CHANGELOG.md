@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/mati-cloud/daimon/compare/v0.3.0...v0.4.0) (2026-11-17)
+
+
+### Features
+
+* support bash and fish shells
+
 ## [0.3.0](https://github.com/mati-cloud/daimon/compare/v0.2.0...v0.3.0) (2026-11-17)
 
 
