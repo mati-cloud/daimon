@@ -55,17 +55,31 @@ jobs:
       - name: Build
         run: ./build.sh
 
-      - name: Package
-        run: tar -czf daimon2-${{ matrix.os }}-${{ matrix.arch }}.tar.gz -C dist daimon2-${{ matrix.os }}-${{ matrix.arch }}
+      # Ship Electrobun's native installers: a drag-to-Applications .dmg on macOS, and on
+      # Linux a self-extracting installer (into ~/.local/share, with a desktop shortcut).
+      - name: Package installers
+        run: |
+          mkdir -p release
+          name=daimon2-${{ matrix.os }}-${{ matrix.arch }}
+          if [ "${{ matrix.os }}" = macos ]; then
+            src=$(find app/artifacts app/build -name '*.dmg' 2>/dev/null | head -1)
+            dest=release/$name.dmg
+          else
+            src=$(ls app/artifacts/*Setup*.tar.gz 2>/dev/null | head -1)
+            dest=release/$name-setup.tar.gz
+          fi
+          [ -n "$src" ] || { echo "::error::no installer in app/artifacts"; ls -R app/artifacts; exit 1; }
+          cp "$src" "$dest"
+          ls -la release
 
       - uses: actions/upload-artifact@v4
         with:
           name: daimon2-${{ matrix.os }}-${{ matrix.arch }}
-          path: daimon2-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+          path: release/*
           if-no-files-found: error
 
       - name: Attach to release
         if: inputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ inputs.tag }}" daimon2-${{ matrix.os }}-${{ matrix.arch }}.tar.gz --clobber --repo "${{ github.repository }}"
+        run: gh release upload "${{ inputs.tag }}" release/* --clobber --repo "${{ github.repository }}"
