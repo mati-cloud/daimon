@@ -296,10 +296,6 @@ export const shell = {
   blockClear:          (session_id: string) => request<boolean>({ type: "blockClear", session_id }),
   prefSet:             (key: string, value: string) => request<boolean>({ type: "prefSet", key, value }),
   prefGet:             (key: string) => request<string | null>({ type: "prefGet", key }),
-  tailscaleStatus:     () => request<{ state: string; authURL: string; ip: string; hostname: string; loginIssue: boolean }>({ type: "tailscaleStatus" }),
-  tailscaleUp:         () => request<{ ok: boolean; error?: string }>({ type: "tailscaleUp" }),
-  tailscaleDown:       () => request<{ ok: boolean; error?: string }>({ type: "tailscaleDown" }),
-  tailscaleLoginUrl:   () => request<{ ok: boolean; error?: string }>({ type: "tailscaleLoginUrl" }),
   /** `plugins`: plugin protocol version; missing on daemons that predate plugins. */
   daemonInfo:          () => request<{ build: string; sessions: number; pid: number; plugins?: number }>({ type: "daemonInfo" }, 15000),
   pluginList:          () => request<{ name: string; file: string; source: string }[]>({ type: "pluginList" }, 15000),
