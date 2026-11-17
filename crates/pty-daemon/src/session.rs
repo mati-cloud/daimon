@@ -342,18 +342,13 @@ impl Session {
         if std::env::var_os("CLAUDECODE").is_some() {
             cmd.env_remove("GIT_EDITOR");
         }
-        // Point ZDOTDIR at our integration dir which sources ~/.zshrc + adds OSC 133 hooks
-        let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent().unwrap().parent().unwrap()
-            .to_path_buf();
-        let integration_dir = workspace_root.join("shell-integration");
-        if integration_dir.exists() {
-            cmd.env("ZDOTDIR", &integration_dir);
+        // ZDOTDIR → our integration dir, which sources ~/.zshrc and adds the OSC 133 hooks;
+        // DAIMON_BIN → the CLI those hooks call (see integration.rs).
+        if let Some(dir) = crate::integration::zdotdir() {
+            cmd.env("ZDOTDIR", dir);
         }
-        // Point DAIMON_BIN at the compiled CLI binary so shell hooks work in dev
-        let daimon_bin = workspace_root.join("target/debug/daimon");
-        if daimon_bin.exists() {
-            cmd.env("DAIMON_BIN", daimon_bin);
+        if let Some(bin) = crate::integration::cli_bin() {
+            cmd.env("DAIMON_BIN", bin);
         }
 
         let mut child = pair.slave.spawn_command(cmd).context("spawn shell failed")?;
