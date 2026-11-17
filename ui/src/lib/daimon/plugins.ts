@@ -23,7 +23,7 @@ import * as jsxRuntime from "react/jsx-runtime";
 import { useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import htm from "htm";
 import { toast } from "sonner";
-import { shell } from "./rpc";
+import { shell, openInBrowser } from "./rpc";
 import { Keys, Kbd } from "@/components/daimon/Kbd";
 
 export type HeaderButton = { id: string; render: ComponentType | ReactNode };
@@ -76,6 +76,8 @@ export const pluginApi = {
   /** Persistent key/value storage (shared prefs table — namespace your keys). */
   prefGet: shell.prefGet,
   prefSet: shell.prefSet,
+  /** Open an http(s) URL in the system browser. */
+  openUrl: openInBrowser,
   /** daimon's own components, for a consistent look. */
   components: { Keys, Kbd },
   toast,

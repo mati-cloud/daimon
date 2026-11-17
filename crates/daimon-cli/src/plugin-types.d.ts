@@ -21,6 +21,8 @@ declare module "daimon" {
   /** Persistent key/value strings (shared with daimon's own prefs: prefix your keys). */
   export function prefGet(key: string): Promise<string | null>;
   export function prefSet(key: string, value: string): Promise<boolean>;
+  /** Open an http(s) URL in the system browser. */
+  export function openUrl(url: string): void;
   /** daimon's keyboard-hint chips: <Keys combo="⌘⇧T" size="xs" />. */
   export const components: {
     Keys: ComponentType<{ combo: string; size?: "xs" | "sm" | "md"; className?: string }>;
@@ -60,9 +62,11 @@ declare module "react" {
 }
 
 declare module "react/jsx-runtime" {
-  import type { ReactElement } from "react";
+  import type { ReactElement, ReactNode } from "react";
   export namespace JSX {
     type Element = ReactElement;
+    /** Components may return any ReactNode (string, null, …), not only elements. */
+    type ElementType = string | ((props: any) => ReactNode);
     interface ElementChildrenAttribute { children: {} }
     interface IntrinsicAttributes { key?: string | number | null }
     interface IntrinsicElements { [tag: string]: Record<string, any> }

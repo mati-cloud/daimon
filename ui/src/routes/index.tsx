@@ -803,11 +803,6 @@ function Daimon() {
         newTab();
         return;
       }
-      if (e.shiftKey && e.key === "T") {
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent("toggle-tailscale"));
-        return;
-      }
       if (e.key === "d" || e.key === "D") {
         e.preventDefault();
         if (e.shiftKey) {

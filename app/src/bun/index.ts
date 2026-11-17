@@ -241,9 +241,7 @@ hostMessageHandlers.push((msg) => {
   if (msg.type !== "openUrl" || typeof (msg as { url?: unknown }).url !== "string") return;
   const url = (msg as { url: string }).url;
   try {
-    if (url === "tailscale://") {
-      Bun.spawn(["open", "-a", "Tailscale"]);
-    } else if (url.startsWith("https://") || url.startsWith("http://")) {
+    if (url.startsWith("https://") || url.startsWith("http://")) {
       openExternal(url);
     }
   } catch (e) {
