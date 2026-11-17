@@ -22,7 +22,7 @@
         {
           "type": "toml",
           "path": "Cargo.lock",
-          "jsonpath": "$.package[?(@.name=='daimon' || @.name=='daimon-complete' || @.name=='pty-daemon' || @.name=='shell-parser' || @.name=='win-backdrop')].version"
+          "jsonpath": "$.package[?(@.name.value=='daimon' || @.name.value=='daimon-complete' || @.name.value=='pty-daemon' || @.name.value=='shell-parser' || @.name.value=='win-backdrop')].version"
         },
         { "type": "json", "path": "app/package.json", "jsonpath": "$.version" },
         { "type": "generic", "path": "app/electrobun.config.ts" }
