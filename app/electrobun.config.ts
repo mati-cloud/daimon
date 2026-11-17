@@ -8,6 +8,10 @@ import { resolve } from "node:path";
 const payload: Record<string, string> = {
   "../ui/dist": "views/daimon2",
   "../target/release/pty-daemon": "pty-daemon",
+  // The CLI (`daimon setup`, `daimon plugin`, shell hooks), shipped inside the installed app.
+  "../target/release/daimon": "daimon-cli",
+  // macOS: native window dragging, loaded from next to the bundled main process (macWindowDrag.ts).
+  ...(process.platform === "darwin" && { "src/bun/libDaimonDrag.dylib": "bun/libDaimonDrag.dylib" }),
   // Windows app built from WSL: the distro its (Linux) daemon runs in.
   "wsl-distro": "wsl-distro",
   // Windows: the window icon, set at runtime (src/bun/winIcon.ts).

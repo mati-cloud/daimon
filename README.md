@@ -39,6 +39,16 @@ Details: [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ---
 
+## Install
+
+Grab the installer for your machine from the [latest release](https://github.com/mati-cloud/daimon/releases/latest):
+
+| Platform | File | Install |
+|---|---|---|
+| macOS (Apple Silicon) | `daimon2-macos-arm64.dmg` | Open it, drag daimon2 into Applications, then run `xattr -dr com.apple.quarantine /Applications/daimon2.app` once (builds aren't notarized yet) |
+| Linux x64 / arm64 | `daimon2-linux-<arch>-setup.tar.gz` | `tar -xzf daimon2-linux-<arch>-setup.tar.gz && ./installer`. It installs to `~/.local/share` and adds a launcher entry |
+| Windows | `daimon2-linux-x64-setup.tar.gz` | Run the Linux installer inside WSL2. The window opens through WSLg |
+
 ## Run
 
 ```sh
