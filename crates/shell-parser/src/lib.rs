@@ -60,14 +60,22 @@ pub fn is_alt_screen_exit(s: &str) -> bool {
     s.contains("\x1b[?1049l")
 }
 
-/// Detect OSC 133;A prompt start — shell is ready for input.
+/// Daimon's prompt-start marker: OSC 133;A followed by its context JSON.
+pub const PROMPT_MARKER: &str = "\x1b]133;A{";
+
+/// Daimon's command-start marker: a bare OSC 133;C terminated by ST.
+pub const COMMAND_START_MARKER: &str = "\x1b]133;C\x1b\\";
+
+/// Detect daimon's OSC 133;A prompt start — shell is ready for input. fish 4 emits its
+/// own OSC 133 marks too (`133;A;…`, `133;C;…`, BEL-terminated); only daimon's count, so
+/// each prompt and command is reported once.
 pub fn is_prompt_marker(s: &str) -> bool {
-    s.contains("\x1b]133;A")
+    s.contains(PROMPT_MARKER)
 }
 
-/// Detect OSC 133;C preexec — command is about to run.
+/// Detect daimon's OSC 133;C preexec — command is about to run. See `is_prompt_marker`.
 pub fn is_command_start_marker(s: &str) -> bool {
-    s.contains("\x1b]133;C")
+    s.contains(COMMAND_START_MARKER)
 }
 
 /// Commands that stream interactively in daimon's block view.
@@ -96,7 +104,7 @@ pub fn is_tui_command(cmd: &str) -> bool {
 }
 
 /// Strip OSC 133 shell integration sequences (command boundary markers).
-/// These are emitted by daimon's zsh integration and must not appear in rendered output.
+/// Emitted by daimon's shell integration (and fish itself); must not appear in rendered output.
 pub fn strip_osc133(s: &str) -> String {
     // Runs on every PTY read: see strip_pty_modes.
     if !s.contains("\x1b]133;") {
@@ -113,6 +121,16 @@ fn matches_prefix(cmd: &str, prefixes: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markers_ignore_foreign_osc133() {
+        assert!(is_prompt_marker("x\x1b]133;A{\"pwd\":\"/\"}\x1b\\"));
+        assert!(!is_prompt_marker("\x1b]133;A;click_events=1\x07"));
+        assert!(!is_prompt_marker("\x1b]133;A\x07"));
+        assert!(is_command_start_marker("\x1b]133;C\x1b\\ls"));
+        assert!(!is_command_start_marker("\x1b]133;C\x07"));
+        assert!(!is_command_start_marker("\x1b]133;C;cmdline_url=ls\x07"));
+    }
 
     #[test]
     fn strip_ansi_removes_color_codes() {
@@ -161,7 +179,7 @@ mod tests {
 
     #[test]
     fn prompt_marker_detection() {
-        assert!(is_prompt_marker("\x1b]133;Asome context json\x07"));
+        assert!(is_prompt_marker("\x1b]133;A{\"pwd\":\"/tmp\"}\x1b\\"));
         assert!(!is_prompt_marker("$ "));
     }
 

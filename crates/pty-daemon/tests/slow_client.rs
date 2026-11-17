@@ -2,7 +2,7 @@
 //! getting output afterwards. (It used to be dropped from the event bus for good while its
 //! socket stayed open: the UI looked alive but no session updated any more.)
 //!
-//! Runs the real daemon binary with its own port and data dirs. Needs zsh.
+//! Runs the real daemon binary with its own port and data dirs. Needs zsh (the fallback when $SHELL is unsupported).
 
 use futures_util::{SinkExt, StreamExt};
 use std::path::PathBuf;
