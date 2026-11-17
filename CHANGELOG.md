@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/mati-cloud/daimon/compare/v0.2.0...v0.3.0) (2026-11-17)
+
+
+### Features
+
+* ship native installers instead of tarballs
+
+
+### Bug Fixes
+
+* **daemon:** ship shell integration with release builds
+
 ## [0.2.0](https://github.com/mati-cloud/daimon/compare/v0.1.0...v0.2.0) (2026-11-17)
 
 
