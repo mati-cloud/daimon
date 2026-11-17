@@ -1,5 +1,4 @@
 /// WebSocket server — one connection per tab, multiplexed over a single port.
-/// Also handles HTTP GET /plugins.js (token-gated) on the same port.
 
 use crate::session::{SessionCommand, SessionEvent, SessionManager};
 use crate::store::Store;
@@ -85,7 +84,6 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
         clients.lock().await.push(Client { tx: client_tx.clone(), kill: kill.clone() });
 
         tokio::spawn(async move {
-            // Check for HTTP GET /plugins.js before attempting WS upgrade.
             // Every client must present the token (?token=…): the daemon runs shells, and
             // any web page can open a WebSocket to localhost.
             let check = |req: &Request, resp: Response| -> std::result::Result<Response, ErrorResponse> {
@@ -373,37 +371,6 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
                                     _ => serde_json::Value::Null,
                                 };
                                 let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
-                            });
-                        }
-                        Ok(SessionCommand::TailscaleStatus { req_id }) => {
-                            let tx = client_tx.clone();
-                            tokio::task::spawn_blocking(move || {
-                                let data = crate::commands::tailscale_status();
-                                let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
-                            });
-                        }
-                        Ok(SessionCommand::TailscaleUp { req_id }) => {
-                            let tx = client_tx.clone();
-                            tokio::task::spawn_blocking(move || {
-                                let data = crate::commands::tailscale_up();
-                                let ok = data["ok"].as_bool().unwrap_or(false);
-                                let _ = tx.blocking_send(SessionEvent::Response { req_id, ok, data });
-                            });
-                        }
-                        Ok(SessionCommand::TailscaleDown { req_id }) => {
-                            let tx = client_tx.clone();
-                            tokio::task::spawn_blocking(move || {
-                                let data = crate::commands::tailscale_down();
-                                let ok = data["ok"].as_bool().unwrap_or(false);
-                                let _ = tx.blocking_send(SessionEvent::Response { req_id, ok, data });
-                            });
-                        }
-                        Ok(SessionCommand::TailscaleLoginUrl { req_id }) => {
-                            let tx = client_tx.clone();
-                            tokio::task::spawn_blocking(move || {
-                                let data = crate::commands::tailscale_login_url();
-                                let ok = data["ok"].as_bool().unwrap_or(false);
-                                let _ = tx.blocking_send(SessionEvent::Response { req_id, ok, data });
                             });
                         }
                         Ok(SessionCommand::PluginList { req_id }) => {
