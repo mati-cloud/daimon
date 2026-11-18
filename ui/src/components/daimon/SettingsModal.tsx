@@ -12,8 +12,12 @@ import { GLASS_DEFAULT, GLASS_MIN_OPACITY, loadGlass, nativeBlurLabel, nativeBlu
 
 /** The Linux app's window is opaque (see app/src/bun/index.ts): Electrobun delivers no
  *  keyboard input to a see-through CEF window there. DAIMON_TRANSPARENT=1 opts in. */
-const LINUX_OPAQUE = /Linux/.test(navigator.platform) && !document.documentElement.classList.contains("native-transparent");
-const LINUX_OPAQUE_WHY = "Opacity and blur need a see-through window. On Linux the app's engine (Electrobun / CEF) doesn't deliver keyboard input to see-through windows yet, so the window stays opaque until that is fixed. Blur will then work on KDE Plasma (KWin); GNOME's compositor (Mutter) can't blur behind windows.";
+/** A function, read at render: this module is imported before main.tsx marks <html>
+ *  `native-transparent` (imports run first), so a constant would always say opaque. */
+const linuxOpaque = () => /Linux/.test(navigator.platform) && !document.documentElement.classList.contains("native-transparent");
+const LINUX_OPAQUE_WHY = "Opacity needs a see-through window. On Linux the app's engine (Electrobun / CEF) doesn't deliver keyboard input to see-through windows yet, so the window stays opaque until that is fixed.";
+const IS_LINUX = /Linux/.test(navigator.platform);
+const LINUX_BLUR_WHY = "Blur behind the window is done by the desktop's compositor. On Linux they offer at most on/off with one global strength for all windows (KDE Plasma), or nothing (GNOME) — no per-app blur radius as on Windows and macOS.";
 import { shell } from "@/lib/daimon/rpc";
 import { usePresence } from "@/lib/daimon/presence";
 import { setLinkPreviewsEnabled, useLinkPreviewsEnabled } from "@/lib/daimon/linkPreview";
@@ -162,17 +166,17 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
       label: "Background opacity",
       node: (
         <div className="flex items-center gap-2">
-          {LINUX_OPAQUE ? (
+          {linuxOpaque() ? (
             <span className="font-mono text-[10px] text-amber/80" title={LINUX_OPAQUE_WHY}>not on Linux yet</span>
           ) : !document.documentElement.classList.contains("native-transparent") && (
             <span className="font-mono text-[10px] text-amber/80" title="The window was started opaque (DAIMON_TRANSPARENT=0, or a browser tab): opacity only shows in the see-through app window">
               window is opaque
             </span>
           )}
-          {!LINUX_OPAQUE && <span className="font-mono text-xs text-muted-foreground w-9 text-right tabular-nums">{glass.opacity}%</span>}
+          {!linuxOpaque() && <span className="font-mono text-xs text-muted-foreground w-9 text-right tabular-nums">{glass.opacity}%</span>}
           <input
             type="range" min={GLASS_MIN_OPACITY} max={100} value={glass.opacity}
-            disabled={LINUX_OPAQUE}
+            disabled={linuxOpaque()}
             onChange={(e) => setGlass({ opacity: parseInt(e.target.value, 10) })}
             className="w-28 accent-[var(--signal)] disabled:cursor-not-allowed disabled:opacity-40"
           />
@@ -184,28 +188,21 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
       label: "Background blur",
       node: (
         <div className="flex items-center gap-2">
-          {LINUX_OPAQUE ? (
-            <span className="font-mono text-[10px] text-amber/80" title={LINUX_OPAQUE_WHY}>not on Linux yet</span>
-          ) : nativeBlurMode() === "none" ? (
-            <span
-              className="font-mono text-[10px] text-amber/80"
-              title="Blurring what is behind a window is done by the desktop's compositor. On Linux only KDE Plasma's (KWin) offers it to apps; GNOME's (Mutter) and others don't. Opacity works everywhere."
-            >KDE Plasma (KWin) only</span>
+          {IS_LINUX ? (
+            <span className="font-mono text-[10px] text-amber/80" title={LINUX_BLUR_WHY}>not on Linux</span>
           ) : nativeBlurMode() ? (
             <span
               className="font-mono text-xs text-muted-foreground w-14 text-right tabular-nums"
               title={nativeBlurMode() === "variable"
                 ? "How strongly the desktop behind the window is blurred"
-                : nativeBlurMode() === "toggle"
-                  ? "KWin blurs what is behind the window; its strength is set in System Settings → Desktop Effects → Blur"
-                  : "Windows blurs the desktop behind the window in three steps: off, soft, frosted"}
+                : "Windows blurs the desktop behind the window in three steps: off, soft, frosted"}
             >{nativeBlurLabel(glass.blur, nativeBlurMode()!)}</span>
           ) : (
             <span className="font-mono text-xs text-muted-foreground w-9 text-right tabular-nums">{glass.blur}px</span>
           )}
           <input
             type="range" min={0} max={60} value={glass.blur}
-            disabled={LINUX_OPAQUE || nativeBlurMode() === "none"}
+            disabled={IS_LINUX || nativeBlurMode() === "none"}
             onChange={(e) => setGlass({ blur: parseInt(e.target.value, 10) })}
             className="w-28 accent-[var(--signal)] disabled:cursor-not-allowed disabled:opacity-40"
           />

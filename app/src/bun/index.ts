@@ -14,7 +14,7 @@ import { focusLog } from "./focusLog";
 import { prepareCustomFrame, startTopResize } from "./winFrame";
 import { setWindowIcon } from "./winIcon";
 import { startUpdater, type UpdateState } from "./updater";
-import { compositorBlurSupported, setCompositorBlur, startLinuxResize, type ResizeEdge } from "./linuxX11";
+import { startLinuxResize, type ResizeEdge } from "./linuxX11";
 import { resolve } from "node:path";
 
 // ── pty-daemon ────────────────────────────────────────────────────────────────
@@ -25,9 +25,9 @@ const daemon = await connectDaemon(isDev);
 // Native see-through windows: macOS and Windows (WebView2 + DWM, which also gives real
 // desktop blur — see winBackdrop.ts). DAIMON_TRANSPARENT=0 makes them opaque.
 // Linux is opaque unless DAIMON_TRANSPARENT=1: Electrobun (2.0.6) renders a see-through CEF
-// window off-screen and then delivers no keyboard input to the page at all. The rest is in
-// place for when that is fixed — the compositor blurs behind the window on KDE Plasma's
-// KWin (linuxX11.ts).
+// window off-screen and then delivers no keyboard input to the page at all. Blur is off on
+// Linux in any case: compositors blur behind a window at most on/off with their own global
+// strength (KWin), or not at all (GNOME's Mutter) — never at a radius the app chooses.
 const isWindows = process.platform === "win32";
 const isLinux = process.platform === "linux";
 // Windows and Linux: no system title bar — the page draws the caption (drag strip and
@@ -40,16 +40,14 @@ const nativeTransparent = isLinux
 const baseUrl = isDev ? "http://localhost:7881" : "views://daimon2/index.html";
 // ?blur= tells the UI the compositor blurs the desktop behind the window, and how the
 // blur slider behaves: "variable" = any radius (helper DLL), "steps" = DWM's three looks,
-// "toggle" = on/off (KWin sets the strength), "none" = this compositor can't (GNOME's
-// Mutter and others): the setting is disabled. DAIMON_BACKDROP pins a DWM look (steps).
+// "none" = no blur here (Linux): the setting is disabled. DAIMON_BACKDROP pins a DWM look.
 const variableBlur = nativeTransparent && isWindows && !process.env.DAIMON_BACKDROP && loadVariableBlur();
-const linuxBlur = nativeTransparent && isLinux && compositorBlurSupported();
 const query = [
   daemon && `daimon_token=${daemon.token}`,
   daemon && `daimon_port=${daemon.port}`,
   nativeTransparent && "transparent=1",
   nativeTransparent && isWindows && (variableBlur ? "blur=variable" : "blur=steps"),
-  nativeTransparent && isLinux && (linuxBlur ? "blur=toggle" : "blur=none"),
+  nativeTransparent && isLinux && "blur=none",
   // The page draws the title bar (drag strip + minimize / maximize / close): TitleBar.tsx.
   customFrame && "frame=custom",
   // Benchmark mode: the UI runs these commands and records timings (see ui/src/lib/daimon/bench.ts).
@@ -256,26 +254,6 @@ if (isWindows && nativeTransparent) {
   }
 }
 
-// Linux on KDE Plasma: KWin blurs what is behind the window while the blur slider is above
-// 0 (it sets the strength itself). Other compositors can't; the page disables the setting.
-if (linuxBlur) {
-  let wanted = true; // until the page reports its saved setting
-  let retry: ReturnType<typeof setTimeout> | null = null;
-  const apply = (attempt = 0) => {
-    if (retry) { clearTimeout(retry); retry = null; }
-    if (setCompositorBlur(win.getFrame(), wanted)) return;
-    // Not mapped / listed by the window manager yet: try again shortly.
-    if (attempt < 40) retry = setTimeout(() => apply(attempt + 1), 250);
-    else appWarn("[main] couldn't find the app's X11 window — compositor blur not applied");
-  };
-  apply();
-  hostMessageHandlers.push((msg) => {
-    if (msg.type !== "glass" || typeof msg.blur !== "number") return;
-    wanted = msg.blur > 0;
-    apply();
-  });
-}
-appLog("[main] linux compositor blur:", isLinux ? (linuxBlur ? "KWin" : "unsupported") : "-");
 
 console.log("[main] window opened →", frontendUrl.replace(/daimon_token=[^&]+/, "daimon_token=…"));
 

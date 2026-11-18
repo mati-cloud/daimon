@@ -15,10 +15,9 @@ import { loadPlugins } from "./lib/daimon/plugins";
   if (url.searchParams.get("transparent") === "1") {
     sessionStorage.setItem("daimon-native-transparent", "1");
     // How the compositor's blur responds to the slider: "variable" (continuous), "steps"
-    // (fixed looks), "toggle" (on/off: KWin) or "none" (it can't blur: GNOME's Mutter and
-    // others). Decides what the Settings blur slider displays.
+    // (fixed looks) or "none" (no blur: Linux). Decides what the Settings blur slider displays.
     const blur = url.searchParams.get("blur");
-    if (blur === "variable" || blur === "steps" || blur === "toggle" || blur === "none") sessionStorage.setItem("daimon-native-blur", blur);
+    if (blur === "variable" || blur === "steps" || blur === "none") sessionStorage.setItem("daimon-native-blur", blur);
     else sessionStorage.removeItem("daimon-native-blur");
     url.searchParams.delete("transparent");
     url.searchParams.delete("blur");

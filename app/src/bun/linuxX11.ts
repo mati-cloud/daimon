@@ -8,11 +8,6 @@
 //   an undecorated window gets no resize borders from the window manager. The page's edge
 //   strips (TitleBar.tsx) ask for one, and we send the standard EWMH request,
 //   _NET_WM_MOVERESIZE — what GTK's begin_resize_drag sends.
-// - Blur: KDE's compositor (KWin) blurs what is behind a window that sets
-//   _KDE_NET_WM_BLUR_BEHIND_REGION, and advertises that in _NET_SUPPORTED. Other compositors
-//   — GNOME's Mutter among them — offer applications no blur behind a window at all.
-//   Apps only switch it on or off; KWin sets the strength (System Settings → Desktop
-//   Effects → Blur).
 
 import { dlopen, FFIType, ptr, read, type Pointer } from "bun:ffi";
 
@@ -27,9 +22,6 @@ const DIRECTION: Record<ResizeEdge, number> = {
 const ClientMessage = 33;
 const SubstructureRedirectMask = 1 << 20;
 const SubstructureNotifyMask = 1 << 19;
-const PropModeReplace = 0;
-const XA_ATOM = 4n;
-const XA_CARDINAL = 6n;
 const XA_STRING = 31n;
 const XA_WINDOW = 33n;
 /** WM_CLASS of the app's windows: the Electrobun app name ("daimon2", "daimon2-dev"). */
@@ -48,11 +40,6 @@ function openX11() {
         FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr],
       returns: FFIType.i32,
     },
-    XChangeProperty: {
-      args: [FFIType.ptr, FFIType.u64, FFIType.u64, FFIType.u64, FFIType.i32, FFIType.i32, FFIType.ptr, FFIType.i32],
-      returns: FFIType.i32,
-    },
-    XDeleteProperty: { args: [FFIType.ptr, FFIType.u64, FFIType.u64], returns: FFIType.i32 },
     XQueryPointer: {
       args: [FFIType.ptr, FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr],
       returns: FFIType.i32,
@@ -78,11 +65,9 @@ function openX11() {
     display,
     root: lib.symbols.XDefaultRootWindow(display) as bigint,
     atoms: {
-      supported: atom("_NET_SUPPORTED"),
       clientList: atom("_NET_CLIENT_LIST"),
       wmClass: atom("WM_CLASS"),
       moveResize: atom("_NET_WM_MOVERESIZE"),
-      kdeBlur: atom("_KDE_NET_WM_BLUR_BEHIND_REGION"),
     },
   };
 }
@@ -164,38 +149,4 @@ export function startLinuxResize(edge: ResizeEdge): boolean {
   const sent = x.s.XSendEvent(x.display, x.root, 0, SubstructureRedirectMask | SubstructureNotifyMask, ptr(ev));
   x.s.XFlush(x.display);
   return sent !== 0;
-}
-
-// ── Blur (KWin) ──────────────────────────────────────────────────────────────
-
-/** Whether the compositor blurs behind windows on request: KWin lists its blur property in
- *  _NET_SUPPORTED. False on GNOME (Mutter) and other compositors without it. */
-export function compositorBlurSupported(): boolean {
-  const x = getX11();
-  if (!x) return false;
-  return property(x, x.root, x.atoms.supported, XA_ATOM).includes(x.atoms.kdeBlur);
-}
-
-/**
- * Blur (or stop blurring) what is behind the app window `frame` (the window's frame, as
- * Electrobun reports it). An empty region means the whole window. Returns false if the
- * window isn't found yet (not mapped) — call again later.
- */
-export function setCompositorBlur(frame: Rect, on: boolean): boolean {
-  const x = getX11();
-  if (!x) return false;
-  const windows = ownWindows(x);
-  // The app window at this frame (several may share the class: installed app + dev build).
-  const distance = (r: Rect) =>
-    Math.abs(r.x - frame.x) + Math.abs(r.y - frame.y) + Math.abs(r.width - frame.width) + Math.abs(r.height - frame.height);
-  const own = windows.sort((a, b) => distance(a.rect) - distance(b.rect))[0];
-  if (!own || (windows.length > 1 && distance(own.rect) > 64)) return false;
-  if (on) {
-    const none = new BigUint64Array(1); // no rectangles: the whole window
-    x.s.XChangeProperty(x.display, own.win, x.atoms.kdeBlur, XA_CARDINAL, 32, PropModeReplace, ptr(none), 0);
-  } else {
-    x.s.XDeleteProperty(x.display, own.win, x.atoms.kdeBlur);
-  }
-  x.s.XFlush(x.display);
-  return true;
 }
