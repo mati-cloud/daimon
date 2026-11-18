@@ -11,7 +11,7 @@ import { displayPath } from "@/lib/daimon/world";
 import { shell } from "@/lib/daimon/rpc";
 import { sendRaw, resizePty, getTuiReplayBuffer, getAltScreen, onAltScreenChange, takeRedraw, STREAMING_INTERACTIVE_RE, abandonRun, looksLikeYaml, splitHtmlLines } from "@/lib/daimon/shell";
 import type { Block, Out, LsEntry, GitStatusFile, GitBranchNode, GitLogRef } from "@/lib/daimon/shell";
-import { Wraith } from "wraithterm";
+import { mountTui, type TuiTerminal } from "@/lib/daimon/tuiTerminal";
 import hljs from "highlight.js/lib/core";
 import hljsBash from "highlight.js/lib/languages/bash";
 import hljsJson from "highlight.js/lib/languages/json";
@@ -2864,12 +2864,11 @@ function BlockViewImpl({ block, modeActive = false, onRerun, isLast, currentCtx 
   useEffect(() => {
     if (!isTuiActive || !inlineTuiRef.current) return;
     const el = inlineTuiRef.current;
-    // Wraith: libghostty-vt + a WebGPU renderer in a worker. It fits itself to the
-    // host (its own ResizeObserver), speaks the kitty keyboard and graphics protocols,
-    // and keeps scrollback inside its viewport. There is no other renderer: if WebGPU
-    // is missing the block shows the error.
+    // Wraith (libghostty-vt + WebGPU in a worker) where WebGPU exists, else xterm's DOM
+    // renderer (Linux's WebKitGTK has no WebGPU) — see tuiTerminal.ts. Either fits itself
+    // to the host and keeps scrollback inside its viewport.
     let disposed = false;
-    let term: Wraith | null = null;
+    let term: TuiTerminal | null = null;
     // Bytes that arrive while the engine is still mounting: the replay buffer first,
     // then whatever the PTY sends in the meantime, in order.
     const pending: string[] = [...getTuiReplayBuffer(sessionId)];
@@ -2884,11 +2883,10 @@ function BlockViewImpl({ block, modeActive = false, onRerun, isLast, currentCtx 
     });
     const subs: { dispose(): void }[] = [];
 
-    Wraith.mount(el, {
+    mountTui(el, {
       fontSize: 13,
       lineHeight: 1.2,
       scrollback: 10000,
-      commandBlocks: false, // daimon draws its own blocks
       theme: {
         foreground: "#e6edf3",
         background: TUI_BG,
