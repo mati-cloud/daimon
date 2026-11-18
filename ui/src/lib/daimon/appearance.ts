@@ -34,24 +34,22 @@ export function applyGlass(g: Glass) {
   } catch { /* shell bridge unavailable */ }
 }
 
-export type NativeBlurMode = "variable" | "steps" | "toggle" | "none";
+export type NativeBlurMode = "variable" | "steps" | "none";
 
 /**
  * How the native window blurs the desktop behind it, if the compositor does it:
  * "variable" = continuously (Windows, helper DLL), "steps" = fixed looks (Windows/DWM
- * fallback), "toggle" = on/off with the compositor's own strength (Linux, KDE Plasma's KWin),
- * "none" = this compositor can't blur behind windows (Linux, e.g. GNOME's Mutter).
- * null: blurred by the page itself (macOS).
+ * fallback), "none" = no blur (Linux: compositors offer at most on/off with their own
+ * global strength). null: blurred by the page itself (macOS).
  */
 export function nativeBlurMode(): NativeBlurMode | null {
   const mode = document.documentElement.dataset["nativeBlur"];
-  return mode === "variable" || mode === "steps" || mode === "toggle" || mode === "none" ? mode : null;
+  return mode === "variable" || mode === "steps" || mode === "none" ? mode : null;
 }
 
 /** What the blur slider shows for a native blur. Mirrors app/src/bun/winBackdrop.ts. */
 export function nativeBlurLabel(blur: number, mode: NativeBlurMode): string {
   if (mode === "variable") return `${blur}px`;
-  if (mode === "toggle") return blur <= 0 ? "off" : "on";
   if (mode === "none") return "n/a";
   return blur <= 0 ? "off" : blur <= 30 ? "soft" : "frosted";
 }
