@@ -111,7 +111,7 @@ const EDGES: { edge: Edge; style: React.CSSProperties; cursor: string }[] = [
 ];
 
 /** Linux: invisible strips along the window's edges; a press asks the host to start a
- *  window-manager resize from that edge (app/src/bun/linuxResize.ts). */
+ *  window-manager resize from that edge (app/src/bun/linuxX11.ts). */
 function ResizeEdges() {
   return (
     <>
