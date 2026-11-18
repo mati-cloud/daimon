@@ -1265,7 +1265,7 @@ function Daimon() {
 
       <div className="flex flex-1 overflow-hidden">
       {/* Sidebar */}
-      <aside className={`shrink-0 flex-col border-r border-border bg-sidebar/70 glass chrome-surface lg:flex transition-all duration-200 overflow-hidden ${sidebarOpen ? "w-56" : "w-0 border-r-0"}`}>
+      <aside className={`shrink-0 flex-col border-r border-border bg-sidebar/70 glass chrome-surface flex transition-all duration-200 overflow-hidden ${sidebarOpen ? "w-56" : "w-0 border-r-0"}`}>
         {/* Wordmark — on Windows it sits in the caption strip (top-left corner) instead, see TitleBar's `left` */}
         {customFrame
           ? <div style={{ height: 36 + 12 }} />

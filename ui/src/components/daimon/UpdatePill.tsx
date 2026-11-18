@@ -1,15 +1,19 @@
-// Bottom of the sidebar: a newer daimon is downloading, or ready — click to restart into it.
+// Bottom of the sidebar: a newer daimon is downloading (stage + progress), ready — click to
+// restart into it — or failed (why, with a retry, the release page and the host log).
 // The native host (app/src/bun/updater.ts) sends `daimon:update` events; in a plain
 // browser (no host) nothing ever shows.
 
 import { useEffect, useState } from "react";
-import { DownloadIcon, RotateCwIcon } from "lucide-react";
+import { AlertTriangleIcon, DownloadIcon, RotateCwIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
+import { openInBrowser } from "@/lib/daimon/rpc";
 
+// Mirrors app/src/bun/updater.ts.
 type UpdateState =
   | { state: "none" }
-  | { state: "downloading"; version: string; progress?: number }
-  | { state: "ready"; version: string };
+  | { state: "downloading"; version: string; stage: string; progress?: number }
+  | { state: "ready"; version: string }
+  | { state: "error"; version: string; message: string; notInstalled: boolean; releaseUrl: string; logPath: string };
 
 type CheckResult =
   | { result: "up-to-date"; version: string }
@@ -45,7 +49,11 @@ export function checkForUpdates() {
       case "available":   toast.success(`v${r.version} is available — it's downloading; restart from the sidebar when it's ready`, { id }); break;
       case "busy":        toast("Already checking for updates", { id }); break;
       case "unsupported": toast("Dev builds don't update", { id }); break;
-      case "error":       toast.error(`Update check failed: ${r.message}`, { id }); break;
+      case "error":
+        toast.error(/outside its managed update directory/i.test(r.message)
+          ? "This copy isn't the installed app, so it can't update itself — see the sidebar"
+          : `Update failed: ${r.message}`, { id });
+        break;
       default:            toast.dismiss(id);
     }
   }
@@ -63,13 +71,62 @@ export function UpdatePill() {
     return () => window.removeEventListener("daimon:update", onUpdate);
   }, []);
 
+  // A failure is dismissed until the next one (another version or message).
+  const [dismissed, setDismissed] = useState<string | null>(null);
+
   if (update.state === "none") return null;
 
   if (update.state === "downloading") {
+    const pct = update.progress;
     return (
-      <div className="mx-3 mb-3 flex items-center gap-2 rounded-md px-2 py-1.5 font-mono text-[11px] text-sidebar-foreground/45">
-        <DownloadIcon className="size-3 shrink-0" />
-        <span className="truncate">Downloading v{update.version}{update.progress != null && ` · ${update.progress}%`}</span>
+      <div
+        title={`Downloading daimon v${update.version} in the background`}
+        className="mx-3 mb-3 rounded-md border border-border/60 px-2 py-1.5 font-mono text-[11px] text-sidebar-foreground/60"
+      >
+        <div className="flex items-center gap-2">
+          <DownloadIcon className="size-3 shrink-0 animate-pulse text-amber" />
+          <span className="truncate">{update.stage} v{update.version}{pct != null && ` · ${pct}%`}</span>
+        </div>
+        <div className="mt-1.5 h-0.5 overflow-hidden rounded bg-sidebar-foreground/10">
+          {pct != null
+            ? <div className="h-full bg-amber transition-[width] duration-300" style={{ width: `${pct}%` }} />
+            : <div className="h-full w-1/3 animate-pulse bg-amber/60" />}
+        </div>
+      </div>
+    );
+  }
+
+  if (update.state === "error") {
+    const key = `${update.version}\n${update.message}`;
+    if (dismissed === key) return null;
+    return (
+      <div className="mx-3 mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 font-mono text-[11px] text-sidebar-foreground">
+        <div className="flex items-start gap-2">
+          <AlertTriangleIcon className="mt-px size-3 shrink-0 text-destructive" />
+          <span className="flex-1">
+            {update.notInstalled
+              ? `v${update.version} is out, but this copy isn't the installed app, so it can't update itself.`
+              : `Couldn't download v${update.version}: ${update.message}`}
+          </span>
+          <button onClick={() => setDismissed(key)} title="Dismiss" className="no-drag shrink-0 text-sidebar-foreground/40 hover:text-sidebar-foreground">
+            <XIcon className="size-3" />
+          </button>
+        </div>
+        <div className="mt-1.5 flex gap-3 pl-5 text-sidebar-foreground/60">
+          <button onClick={() => openInBrowser(update.releaseUrl)} className="no-drag underline-offset-2 hover:text-sidebar-foreground hover:underline">
+            {update.notInstalled ? "Get the installer" : "Release page"}
+          </button>
+          {!update.notInstalled && (
+            <button onClick={() => checkForUpdates()} className="no-drag underline-offset-2 hover:text-sidebar-foreground hover:underline">Retry</button>
+          )}
+          <button
+            onClick={() => { void navigator.clipboard?.writeText(update.logPath); toast("Log path copied", { description: update.logPath }); }}
+            title={update.logPath}
+            className="no-drag underline-offset-2 hover:text-sidebar-foreground hover:underline"
+          >
+            Log
+          </button>
+        </div>
       </div>
     );
   }
