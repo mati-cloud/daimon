@@ -4,16 +4,52 @@
 
 import { useEffect, useState } from "react";
 import { DownloadIcon, RotateCwIcon } from "lucide-react";
+import { toast } from "sonner";
 
 type UpdateState =
   | { state: "none" }
   | { state: "downloading"; version: string; progress?: number }
   | { state: "ready"; version: string };
 
-function sendUpdate(action: "state" | "apply") {
-  try {
-    (window as { __electrobunSendToHost?: (m: unknown) => void }).__electrobunSendToHost?.({ type: "update", action });
-  } catch { /* shell bridge unavailable */ }
+type CheckResult =
+  | { result: "up-to-date"; version: string }
+  | { result: "available"; version: string }
+  | { result: "busy" }
+  | { result: "unsupported" }
+  | { result: "error"; message: string };
+
+function sendUpdate(action: "state" | "apply" | "check"): boolean {
+  const send = (window as { __electrobunSendToHost?: (m: unknown) => void }).__electrobunSendToHost;
+  if (!send) return false;
+  try { send({ type: "update", action }); return true; } catch { return false; /* shell bridge unavailable */ }
+}
+
+/** "Check for updates" (command palette): asks the host and reports the answer as a toast. */
+export function checkForUpdates() {
+  const id = "update-check";
+  if (!sendUpdate("check")) {
+    toast("Updates are only available in the desktop app", { id });
+    return;
+  }
+  toast.loading("Checking for updates…", { id });
+  const timeout = setTimeout(() => {
+    window.removeEventListener("daimon:update-check", onResult);
+    toast.error("Update check timed out", { id });
+  }, 30_000);
+  function onResult(e: Event) {
+    clearTimeout(timeout);
+    window.removeEventListener("daimon:update-check", onResult);
+    const r = (e as CustomEvent<CheckResult>).detail;
+    switch (r?.result) {
+      case "up-to-date":  toast.success(`daimon is up to date (v${r.version})`, { id }); break;
+      case "available":   toast.success(`v${r.version} is available — it's downloading; restart from the sidebar when it's ready`, { id }); break;
+      case "busy":        toast("Already checking for updates", { id }); break;
+      case "unsupported": toast("Dev builds don't update", { id }); break;
+      case "error":       toast.error(`Update check failed: ${r.message}`, { id }); break;
+      default:            toast.dismiss(id);
+    }
+  }
+  window.addEventListener("daimon:update-check", onResult);
 }
 
 export function UpdatePill() {

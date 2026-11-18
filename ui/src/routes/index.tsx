@@ -19,7 +19,7 @@ import { KeyboardShortcutsModal } from "@/components/daimon/KeyboardShortcutsMod
 import { SettingsModal } from "@/components/daimon/SettingsModal";
 import { PowerlineStatus } from "@/components/daimon/PowerlineStatus";
 import { TitleBar } from "@/components/daimon/TitleBar";
-import { UpdatePill } from "@/components/daimon/UpdatePill";
+import { checkForUpdates, UpdatePill } from "@/components/daimon/UpdatePill";
 import { describeEl, focusLog, requestPageFocus } from "@/lib/daimon/focusLog";
 import { usePresence } from "@/lib/daimon/presence";
 
@@ -1597,6 +1597,7 @@ function Daimon() {
           { id: "keys", label: "Keyboard shortcuts", description: "⌘K", run: () => { setPaletteOpen(false); setKeysModalOpen(true); } },
           { id: "ssh", label: "Connect via SSH", description: "ssh host", run: () => { setPaletteOpen(false); window.dispatchEvent(new CustomEvent("prefill-composer", { detail: { text: "ssh " } })); } },
           { id: "settings", label: "Settings", description: "⌘,", run: () => { setPaletteOpen(false); setSettingsOpen(true); } },
+          { id: "update", label: "Check for updates", description: "daimon", run: () => { setPaletteOpen(false); checkForUpdates(); } },
         ]}
       />
       <KeyboardShortcutsModal open={keysModalOpen} onClose={() => setKeysModalOpen(false)} />
