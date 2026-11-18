@@ -52,7 +52,7 @@ JSON text frames, tagged by `type`.
   - completion: `complete`, `listPaths`
   - store: `historyAdd/List/Search`, `blockSave/List/Recent/Search/Clear`, `prefGet/Set`
   - daemon: `daemonInfo`, `shutdown`
-  - plugins: `pluginList` (source of `~/.config/daimon/plugins/*.{js,mjs,jsx,ts,tsx}`), `exec` (run a program, no shell, with a timeout)
+  - plugins: `pluginList` (source of `~/.config/daimon/plugins/*.{js,mjs,jsx,ts,tsx}`), `exec` (run a program, no shell, with a timeout and extra env), `setContextEnv` (the env vars plugins `watchEnv`, stored as `<data dir>/daimon/context-env` for `daimon precmd`)
 - **daemon → UI:** `output`, `prompt`, `commandStart`, `altScreenEnter`, `altScreenExit`, `exit`, `response`, `pluginsChanged` (the plugins folder is polled every 500 ms).
 
 A session is created on the first `write` to an unknown tab id.
@@ -77,7 +77,7 @@ How daimon knows where a command starts and ends:
 1. The daemon starts the user's `$SHELL` (zsh, bash or fish; otherwise zsh, then bash) as a login shell, so the user's profile files set `PATH` as in any terminal. Each shell gets daimon's hooks its own way: zsh through a `ZDOTDIR` whose startup files (`.zshenv`, `.zprofile`, `.zshrc`, `.zlogin`) source the user's real ones; bash through `--posix` and `ENV=daimon.bash`, which runs the login files itself; fish through `XDG_DATA_DIRS`, which makes it load `vendor_conf.d/daimon.fish`. The integration also defines a `daimon` function, so the CLI works at the prompt without being on `PATH`.
 2. Two hooks are registered:
    - `preexec` → `daimon preexec` prints `OSC 133;C` (command started)
-   - `precmd` → `daimon precmd` prints `OSC 133;A{json}` (prompt ready) with cwd, exit code, git state (libgit2, no subprocess), k8s and OpenStack context
+   - `precmd` → `daimon precmd` prints `OSC 133;A{json}` (prompt ready) with cwd, exit code, git state, and the env vars plugins asked for (`env`)
 3. The daemon sees the markers in the PTY stream, strips them, and emits `commandStart` / `prompt` events.
 4. The UI turns everything between the two into a block.
 

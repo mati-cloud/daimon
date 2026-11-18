@@ -62,6 +62,39 @@ function Hostname() {
 registerHeaderButton("hostname", Hostname);
 "#;
 
+/// Plugins that ship with daimon (the repo's plugins/ folder), for `daimon plugin add`.
+const BUNDLED: &[(&str, &str)] = &[
+    ("kubernetes", include_str!("../../../plugins/kubernetes.tsx")),
+    ("openstack", include_str!("../../../plugins/openstack.tsx")),
+];
+
+/// Copies a bundled plugin into the plugins folder (with the editor types). Without a
+/// name, lists them. An existing file is kept unless `force`.
+pub fn run_add(name: Option<&str>, force: bool) -> Result<()> {
+    let Some(name) = name else {
+        println!("plugins that ship with daimon (add with `daimon plugin add <name>`):");
+        for (name, _) in BUNDLED {
+            println!("  {name}");
+        }
+        return Ok(());
+    };
+    let Some((_, source)) = BUNDLED.iter().find(|(n, _)| *n == name) else {
+        let names: Vec<&str> = BUNDLED.iter().map(|(n, _)| *n).collect();
+        anyhow::bail!("no bundled plugin '{name}' (available: {})", names.join(", "));
+    };
+    let dir = config_dir()?.join("plugins");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(dir.join("daimon.d.ts"), TYPES)?;
+    let path = dir.join(format!("{name}.tsx"));
+    if path.exists() && !force {
+        println!("kept    {} (already there; --force replaces it)", path.display());
+    } else {
+        std::fs::write(&path, source)?;
+        println!("added   {}", path.display());
+    }
+    Ok(())
+}
+
 pub fn run_init() -> Result<()> {
     let config = config_dir()?;
     let dir = config.join("plugins");

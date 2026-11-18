@@ -16,7 +16,7 @@ A fast, minimal terminal with a smart shell that understands what you're doing �
 - **TUI apps inline** — vim, htop, k9s etc. run in a [Wraith](https://wraithterm.com) terminal inside the block (Ghostty's VT engine + WebGPU renderer in a worker, kitty keyboard protocol); alt-screen apps take the whole pane
 - **SSH** — remote zsh sessions get the same command blocks, nothing to install on the remote
 - **Completions** — `Tab` for subcommands, flags, paths, git branches/tags/remotes; YAML specs, add your own in `~/.config/daimon/specs/`
-- **Context** — git branch/dirty/ahead/behind, k8s context + namespace, OpenStack region/project in the prompt bar
+- **Context** — git branch/dirty/ahead/behind in the prompt bar; plugins add their own badges (`daimon plugin add kubernetes` for the k8s context + namespace and a context switcher, `daimon plugin add openstack` for region/project)
 - **Split panes** — two sessions side by side
 - **Session icons** — the sidebar shows what each session is running (git, kubectl, docker, ssh, claude, …)
 - **Sticky command header** — the command of the block you scrolled into stays in the title bar; click to jump back to its start
@@ -116,7 +116,7 @@ All platforms: [Rust](https://rustup.rs) (stable, ≥ 1.86), [Bun](https://bun.s
 | `⌘1`–`⌘9` | switch session |
 | `⌘D` / `⌘⇧D` | split pane (or switch pane) / close split |
 | `⌘B` | sidebar |
-| `⌘J` | context switcher |
+| `⌘J` | Kubernetes context switcher (`kubernetes` plugin) |
 | `⌘,` | settings |
 | `⌘K` | shortcuts overview |
 | `⌘⇧P` | presentation mode |

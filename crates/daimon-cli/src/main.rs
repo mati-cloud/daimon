@@ -15,8 +15,13 @@ fn main() -> anyhow::Result<()> {
             match args.next().as_deref() {
                 Some("init") => plugin::run_init(),
                 Some("list") => plugin::run_list(),
+                Some("add") => {
+                    let rest: Vec<String> = args.collect();
+                    let force = rest.iter().any(|a| a == "--force");
+                    plugin::run_add(rest.iter().find(|a| !a.starts_with("--")).map(String::as_str), force)
+                }
                 _ => {
-                    eprintln!("usage: daimon plugin <init|list>");
+                    eprintln!("usage: daimon plugin <init|list|add [name] [--force]>");
                     std::process::exit(1)
                 }
             }

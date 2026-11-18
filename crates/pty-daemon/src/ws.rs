@@ -195,27 +195,6 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
                                 let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
                             });
                         }
-                        Ok(SessionCommand::ListContexts { req_id }) => {
-                            let tx = client_tx.clone();
-                            tokio::task::spawn_blocking(move || {
-                                let data = crate::commands::list_contexts();
-                                let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
-                            });
-                        }
-                        Ok(SessionCommand::SyncContexts { req_id }) => {
-                            let tx = client_tx.clone();
-                            tokio::task::spawn_blocking(move || {
-                                let data = crate::commands::sync_contexts();
-                                let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
-                            });
-                        }
-                        Ok(SessionCommand::ListRegions { req_id }) => {
-                            let tx = client_tx.clone();
-                            tokio::task::spawn_blocking(move || {
-                                let data = crate::commands::list_regions();
-                                let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
-                            });
-                        }
                         Ok(SessionCommand::ListPaths { req_id, prefix, cwd, kind }) => {
                             let tx = client_tx.clone();
                             tokio::task::spawn_blocking(move || {
@@ -373,6 +352,16 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
                                 let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
                             });
                         }
+                        Ok(SessionCommand::SetContextEnv { req_id, names }) => {
+                            let tx = client_tx.clone();
+                            tokio::task::spawn_blocking(move || {
+                                let (ok, data) = match crate::plugins::set_context_env(&names) {
+                                    Ok(()) => (true, serde_json::json!(true)),
+                                    Err(e) => (false, serde_json::json!({ "error": e.to_string() })),
+                                };
+                                let _ = tx.blocking_send(SessionEvent::Response { req_id, ok, data });
+                            });
+                        }
                         Ok(SessionCommand::PluginList { req_id }) => {
                             let tx = client_tx.clone();
                             tokio::task::spawn_blocking(move || {
@@ -380,10 +369,10 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
                                 let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
                             });
                         }
-                        Ok(SessionCommand::Exec { req_id, cmd, args, cwd, timeout_ms }) => {
+                        Ok(SessionCommand::Exec { req_id, cmd, args, cwd, env, timeout_ms }) => {
                             let tx = client_tx.clone();
                             tokio::spawn(async move {
-                                let (ok, data) = crate::plugins::exec(cmd, args, cwd, timeout_ms).await;
+                                let (ok, data) = crate::plugins::exec(cmd, args, cwd, env, timeout_ms).await;
                                 let _ = tx.send(SessionEvent::Response { req_id, ok, data }).await;
                             });
                         }
