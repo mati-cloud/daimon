@@ -136,14 +136,27 @@ pub fn detach(args: &[String]) -> Result<()> {
     }
     fs::create_dir_all(state_dir())?;
     let log = fs::OpenOptions::new().create(true).append(true).open(log_path(port))?;
-    let mut child = Command::new(std::env::current_exe()?)
-        .args(args.iter().filter(|a| *a != "--detach"))
+    let mut cmd = Command::new(std::env::current_exe()?);
+    cmd.args(args.iter().filter(|a| *a != "--detach"))
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
-        .stderr(log)
-        .process_group(0) // not killed with the caller's group (terminal, app launcher)
-        .spawn()
-        .context("spawn daemon")?;
+        .stderr(log);
+    // A session of its own, not just a process group: no controlling terminal, so it
+    // isn't killed with the caller's group (terminal, app launcher) — and the interactive
+    // login shell shell_env.rs runs can't find the caller's terminal, see itself in a
+    // background group and stop the daemon's whole group with SIGTTIN. A stopped group
+    // is orphaned once this process exits and gets SIGHUP: the daemon died silently
+    // whenever the app had been started from a terminal.
+    // SAFETY: setsid is async-signal-safe; nothing else runs between fork and exec.
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = cmd.spawn().context("spawn daemon")?;
 
     for _ in 0..100 {
         if let Some(status) = child.try_wait()? {
