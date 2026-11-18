@@ -3,6 +3,7 @@ mod complete;
 mod daemon_info;
 mod integration;
 mod kitty_graphics;
+mod launcher_env;
 mod link_preview;
 mod plugins;
 mod session;
@@ -26,6 +27,8 @@ use tracing_subscriber::EnvFilter;
 ///
 /// Port: DAIMON_PORT (default 7878).
 fn main() -> Result<()> {
+    // Before anything else (and before any thread): drop the launcher's CEF preloads.
+    launcher_env::scrub();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let has = |flag: &str| args.iter().any(|a| a == flag);
     if has("--info") {

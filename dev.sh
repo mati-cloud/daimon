@@ -149,6 +149,10 @@ free_port() {
 export DAIMON_PORT="${DAIMON_PORT:-7877}"
 for p in "$DAIMON_PORT" 7880 7881; do free_port "$p"; done
 [ "$WIN_NATIVE" = 1 ] && win_stop
+# A previous dev app (launcher, main process, Chromium helpers) can outlive its dev.sh;
+# its CEF would hold the profile lock and the new window fail to start.
+stop_dev_app() { pkill -f "$ROOT/app/build/dev-[^/]*/" 2>/dev/null || true; }
+stop_dev_app
 
 # ── Cleanup on exit ───────────────────────────────────────────────────────────
 PIDS=()
@@ -160,6 +164,7 @@ cleanup() {
     kill "$pid" 2>/dev/null || true
   done
   [ "$WIN_NATIVE" = 1 ] && win_stop
+  stop_dev_app
   wait 2>/dev/null || true
 }
 trap cleanup INT TERM EXIT
