@@ -17,52 +17,194 @@
 ///   app's theme (tailwindcss). Both are lazy chunks, fetched only when a plugin needs them.
 /// - A plugin may also `export default function (daimon) { … }`; if it returns a function,
 ///   that's called before the plugin is reloaded or removed (clear intervals there).
+/// - Everything a plugin registers is dropped and registered again on each reload.
 
 import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import { useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import htm from "htm";
 import { toast } from "sonner";
-import { shell, openInBrowser } from "./rpc";
+import { shell, openInBrowser, type ShellContext } from "./rpc";
 import { Keys, Kbd } from "@/components/daimon/Kbd";
+
+// ── Registries ───────────────────────────────────────────────────────────────────────────
+
+/** Things plugins register (header buttons, status items, …), keyed by id: registering an
+ *  id again replaces it. While plugins (re)load, registrations collect in `staged` and
+ *  replace the list in one go, so a reload doesn't flicker. */
+function createRegistry<T extends { id: string }>() {
+  let items: readonly T[] = [];
+  let staged: T[] | null = null;
+  const listeners = new Set<() => void>();
+  const subscribe = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
+  const set = (next: readonly T[]) => { items = next; listeners.forEach((fn) => fn()); };
+  return {
+    add(item: T) {
+      if (staged) staged = [...staged.filter((x) => x.id !== item.id), item];
+      else set([...items.filter((x) => x.id !== item.id), item]);
+    },
+    get: () => items,
+    use: () => useSyncExternalStore(subscribe, () => items, () => items),
+    subscribe,
+    stage() { staged = []; },
+    commit() { const next = staged ?? items; staged = null; set(next); },
+  };
+}
 
 export type HeaderButton = { id: string; render: ComponentType | ReactNode };
 
-let registry: readonly HeaderButton[] = [];
-/** While plugins (re)load, registrations collect here and replace `registry` in one go,
- *  so a reload doesn't flicker the header. */
-let staging: HeaderButton[] | null = null;
-const listeners = new Set<() => void>();
+/** What a status item shows. daimon draws it as a header badge or a powerline segment,
+ *  following the user's "Context badges" / "Context powerline" settings. */
+export type StatusItem = {
+  /** Small icon, e.g. `<img src="data:image/svg+xml,…" />` or an inline `<svg>`. */
+  icon?: ReactNode;
+  label: ReactNode;
+  /** Secondary text after a muted "·". */
+  detail?: ReactNode;
+  /** Label color in the badge style (any CSS color). */
+  color?: string;
+  title?: string;
+  onClick?: () => void;
+};
+/** Called while rendering, so it may use hooks. Return null to show nothing. */
+export type UseStatusItem = () => StatusItem | null;
+export type RegisteredStatusItem = { id: string; use: UseStatusItem; serial: number };
 
-function subscribe(fn: () => void) {
-  listeners.add(fn);
-  return () => { listeners.delete(fn); };
-}
+type Shortcut = { id: string; combo: string; handler: (e: KeyboardEvent) => void };
+type WatchedEnv = { id: string };
 
-function commit(next: readonly HeaderButton[]) {
-  registry = next;
-  listeners.forEach((fn) => fn());
-}
+const headerButtons = createRegistry<HeaderButton>();
+const statusItems = createRegistry<RegisteredStatusItem>();
+const shortcuts = createRegistry<Shortcut>();
+const watchedEnv = createRegistry<WatchedEnv>();
+const registries = [headerButtons, statusItems, shortcuts, watchedEnv];
+let statusSerial = 0;
 
 /** Put a button/badge into the header's right-side slot. Registering an id again replaces it.
  *  Pass a component (preferred — it can use hooks) or a ready element. */
 export function registerHeaderButton(id: string, render: ComponentType | ReactNode) {
-  if (staging) {
-    staging = [...staging.filter((b) => b.id !== id), { id, render }];
-    return;
-  }
-  commit([...registry.filter((b) => b.id !== id), { id, render }]);
+  headerButtons.add({ id, render });
 }
 
 /** Current header buttons; re-renders when they change. */
-export function useHeaderButtons(): readonly HeaderButton[] {
-  return useSyncExternalStore(subscribe, () => registry, () => registry);
+export const useHeaderButtons = (): readonly HeaderButton[] => headerButtons.use();
+
+/** Add a status item (context badge / powerline segment). `use` runs while rendering,
+ *  so it may use hooks, e.g. `useShellContext()`. */
+export function registerStatusItem(id: string, use: UseStatusItem) {
+  // A new serial remounts the item, so a reloaded plugin's hooks start fresh.
+  statusItems.add({ id, use, serial: ++statusSerial });
+}
+
+export const useStatusItems = (): readonly RegisteredStatusItem[] => statusItems.use();
+
+// ── Keyboard shortcuts ───────────────────────────────────────────────────────────────────
+
+/** `combo`: "+"-joined modifiers and a key, e.g. "mod+j", "mod+shift+k", "alt+1". `mod` is
+ *  ⌘ or Ctrl (either works, like daimon's own shortcuts). Plugin shortcuts win over
+ *  daimon's own. Registering an id again replaces it. */
+export function registerShortcut(id: string, combo: string, handler: (e: KeyboardEvent) => void) {
+  shortcuts.add({ id, combo: combo.toLowerCase(), handler });
+}
+
+function matches(combo: string, e: KeyboardEvent): boolean {
+  const parts = combo.split("+").map((p) => p.trim()).filter(Boolean);
+  const key = parts.pop();
+  if (!key || e.key.toLowerCase() !== key) return false;
+  const want = new Set(parts);
+  const mod = want.has("mod");
+  return (mod ? e.metaKey || e.ctrlKey : e.metaKey === want.has("meta") && e.ctrlKey === want.has("ctrl"))
+    && e.shiftKey === want.has("shift")
+    && e.altKey === want.has("alt");
+}
+
+function onShortcutKey(e: KeyboardEvent) {
+  const hit = shortcuts.get().find((s) => matches(s.combo, e));
+  if (!hit) return;
+  e.preventDefault();
+  e.stopPropagation();
+  try { hit.handler(e); } catch (err) { reportError(hit.id, err); }
+}
+
+// ── Shell context ────────────────────────────────────────────────────────────────────────
+
+let activeTab = "";
+let currentContext: ShellContext = {};
+const contextListeners = new Set<(ctx: ShellContext) => void>();
+
+function refreshContext() {
+  const next = shell.context(activeTab) ?? {};
+  if (next === currentContext) return;
+  currentContext = next;
+  contextListeners.forEach((fn) => { try { fn(next); } catch (e) { console.error("[plugins]", e); } });
+}
+
+shell.onContext((tabId) => { if (tabId === activeTab) refreshContext(); });
+
+/** daimon tells plugins which tab's shell is in focus. */
+export function setPluginActiveTab(tabId: string) {
+  activeTab = tabId;
+  refreshContext();
+}
+
+/** Calls `fn` with the focused shell's prompt context now and after every prompt (a new
+ *  object each time). Returns an unsubscribe function. */
+export function onShellContext(fn: (ctx: ShellContext) => void): () => void {
+  contextListeners.add(fn);
+  fn(currentContext);
+  return () => { contextListeners.delete(fn); };
+}
+
+const subscribeContext = (fn: () => void) => {
+  contextListeners.add(fn);
+  return () => { contextListeners.delete(fn); };
+};
+
+/** The focused shell's prompt context: cwd, git, exit code, and `env` with the watched
+ *  env vars. Re-renders after every prompt. */
+export function useShellContext(): ShellContext {
+  return useSyncExternalStore(subscribeContext, () => currentContext, () => currentContext);
+}
+
+/** Ask the shell to report these env vars in `context.env` (from the next prompt on).
+ *  Only names you ask for leave the shell. */
+export function watchEnv(names: string | string[]) {
+  for (const name of Array.isArray(names) ? names : [names]) watchedEnv.add({ id: name });
+}
+
+let sentEnv: string | null = null;
+function syncWatchedEnv() {
+  const names = [...new Set(watchedEnv.get().map((w) => w.id))].sort();
+  const key = names.join("\n");
+  if (key === sentEnv) return;
+  sentEnv = key;
+  shell.setContextEnv(names).catch((e) => { sentEnv = null; console.warn("[plugins] watchEnv:", e); });
+}
+
+// ── Commands ─────────────────────────────────────────────────────────────────────────────
+
+let commandRunner: ((command: string) => void) | null = null;
+
+/** daimon hands plugins its way to run a command in the focused tab. */
+export function setPluginCommandRunner(fn: (command: string) => void) {
+  commandRunner = fn;
+}
+
+/** Run a command line in the focused tab, as if typed: it shows up as a block. */
+function runCommand(command: string) {
+  if (!commandRunner) throw new Error("daimon isn't ready to run commands yet");
+  commandRunner(command);
+}
+
+/** Move keyboard focus back to the focused tab's command input. */
+function focusComposer() {
+  window.dispatchEvent(new CustomEvent("focus-composer"));
 }
 
 const html = htm.bind(React.createElement);
 
 /** The `daimon` module / default-export argument. Keep this stable — it's the public API,
- *  typed for plugin authors in crates/daimon-cli/src/daimon.d.ts. */
+ *  typed for plugin authors in crates/daimon-cli/src/plugin-types.d.ts. */
 export const pluginApi = {
   /** API version; bumped on breaking changes. */
   version: 1,
@@ -70,8 +212,15 @@ export const pluginApi = {
   h: React.createElement,
   html,
   registerHeaderButton,
+  registerStatusItem,
+  registerShortcut,
+  useShellContext,
+  onShellContext,
+  watchEnv,
+  runCommand,
+  focusComposer,
   /** Run a program (no shell) via the daemon: `{ code, stdout, stderr }`. Rejects on spawn
-   *  failure or timeout (default 10 s). */
+   *  failure or timeout (default 10 s). `env` adds variables to the daemon's environment. */
   exec: shell.exec,
   /** Persistent key/value storage (shared prefs table — namespace your keys). */
   prefGet: shell.prefGet,
@@ -180,7 +329,7 @@ async function loadAll() {
   // CSS first, so a new button doesn't paint unstyled for a frame.
   try { await applyPluginCss(plugins); } catch (e) { reportError("tailwind", e); }
 
-  staging = [];
+  registries.forEach((r) => r.stage());
   try {
     for (const p of plugins) {
       try {
@@ -191,9 +340,8 @@ async function loadAll() {
       }
     }
   } finally {
-    const next = staging;
-    staging = null;
-    commit(next);
+    registries.forEach((r) => r.commit());
+    syncWatchedEnv();
   }
 }
 
@@ -229,6 +377,7 @@ export async function loadPlugins() {
     return;
   }
   shell.onPluginsChanged(() => { void reloadPlugins(); });
+  window.addEventListener("keydown", onShortcutKey, true);
   await reloadPlugins();
 }
 

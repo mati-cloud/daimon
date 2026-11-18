@@ -6,16 +6,15 @@ import { BlockMeta, BlockView, PresentationModeContext } from "@/components/daim
 import { CommandIcon } from "@/components/daimon/CommandIcon";
 import { Composer } from "@/components/daimon/Composer";
 import { HistoryPanel } from "@/components/daimon/HistoryPanel";
-import { ContextSwitcher } from "@/components/daimon/ContextSwitcher";
 import { run, sendRaw, resizePty, notifyAltScreen, onAltScreenChange, onTuiChange, STREAMING_INTERACTIVE_RE, isStreamingSession, isWarpified, abandonRun, finishRun, setNotifConfig, type Block, type State } from "@/lib/daimon/shell";
 import { shell, onReconnect, type AttachInfo } from "@/lib/daimon/rpc";
 import { startBench } from "@/lib/daimon/bench";
 import { displayPath } from "@/lib/daimon/world";
-import kubernetesIcon from "@/assets/kubernetes-icon.svg";
 import { LandingPage } from "@/components/daimon/LandingPage";
 import { CommandPalette } from "@/components/daimon/CommandPalette";
 import { GlobalSearch } from "@/components/daimon/GlobalSearch";
-import { HeaderExtensionSlot, OpenStackBadge, HeaderButtonSlot } from "@/components/daimon/HeaderExtension";
+import { HeaderButtonSlot, StatusItemSlot } from "@/components/daimon/HeaderExtension";
+import { setPluginActiveTab, setPluginCommandRunner } from "@/lib/daimon/plugins";
 import { KeyboardShortcutsModal } from "@/components/daimon/KeyboardShortcutsModal";
 import { SettingsModal } from "@/components/daimon/SettingsModal";
 import { PowerlineStatus } from "@/components/daimon/PowerlineStatus";
@@ -23,9 +22,9 @@ import { TitleBar } from "@/components/daimon/TitleBar";
 import { describeEl, focusLog, requestPageFocus } from "@/lib/daimon/focusLog";
 import { usePresence } from "@/lib/daimon/presence";
 
-const TITLE = "daimon — a terminal for cloud operators";
+const TITLE = "daimon — a block-based terminal";
 const DESC =
-  "daimon is a light, block-based terminal: ghost autocomplete, folder-aware suggestions, and a kube context switcher built for cloud regions.";
+  "daimon is a light, block-based terminal: ghost autocomplete, folder-aware suggestions, and plugins.";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -219,19 +218,11 @@ function Daimon() {
   const [gitBehind, setGitBehind] = useState(0);
   const [gitAdded, setGitAdded] = useState(0);
   const [gitRemoved, setGitRemoved] = useState(0);
-  const [osRegion, setOsRegion] = useState<string | null>(null);
-  const [osProject, setOsProject] = useState<string | null>(null);
-  const [osDomain, setOsDomain] = useState<string | null>(null);
-  const [k8sContext, setK8sContext] = useState<string | null>(null);
-  const [k8sNamespace, setK8sNamespace] = useState<string | null>(null);
   const [showBadges, setShowBadges] = useState(true);
   const [showPowerline, setShowPowerline] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchShown = usePresence(searchOpen);   // stays mounted while it animates out
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [ctxSwitcherOpen, setCtxSwitcherOpen] = useState(0);
-  const [ctxSwitcherClose, setCtxSwitcherClose] = useState(0);
-  const ctxSwitcherIsOpen = useRef(false);
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
   const [blockModActive, setBlockModActive] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -366,11 +357,6 @@ function Daimon() {
       if (ctx.gitBehind !== undefined) setGitBehind(Number(ctx.gitBehind) || 0);
       if (ctx.gitAdded !== undefined) setGitAdded(Number(ctx.gitAdded) || 0);
       if (ctx.gitRemoved !== undefined) setGitRemoved(Number(ctx.gitRemoved) || 0);
-      if (ctx.region !== undefined) setOsRegion(ctx.region || null);
-      if (ctx.project !== undefined) setOsProject(ctx.project || null);
-      if (ctx.domain !== undefined) setOsDomain(ctx.domain || null);
-      if (ctx.k8sContext !== undefined) setK8sContext(ctx.k8sContext || null);
-      if (ctx.k8sNamespace !== undefined) setK8sNamespace(ctx.k8sNamespace || null);
     });
     return () => { off(); };
   }, []);
@@ -565,14 +551,13 @@ function Daimon() {
       const info = live.find(([id]) => id === s.id)?.[1];
       if (!info?.context) return s;
       try {
-        const ctx = JSON.parse(info.context) as { pwd?: string; gitBranch?: string; k8sContext?: string };
+        const ctx = JSON.parse(info.context) as { pwd?: string; gitBranch?: string };
         return {
           ...s,
           state: {
             ...s.state,
             ...(ctx.pwd ? { cwd: ctx.pwd.split("/").filter(Boolean) } : {}),
             ...(ctx.gitBranch ? { gitBranch: ctx.gitBranch } : {}),
-            ...(ctx.k8sContext ? { ctx: { ...s.state.ctx, name: ctx.k8sContext } } : {}),
           },
         };
       } catch { return s; }
@@ -784,18 +769,6 @@ function Daimon() {
       if (e.key === "h") {
         e.preventDefault();
         setHistoryOpen((o) => !o);
-        return;
-      }
-      if (e.key === "j") {
-        e.preventDefault();
-        if (ctxSwitcherIsOpen.current) {
-          setCtxSwitcherClose((n) => n + 1);
-          ctxSwitcherIsOpen.current = false;
-          focusComposer();
-        } else {
-          setCtxSwitcherOpen((n) => n + 1);
-          ctxSwitcherIsOpen.current = true;
-        }
         return;
       }
       if (!e.shiftKey && e.key === "t") {
@@ -1081,7 +1054,10 @@ function Daimon() {
   };
   useEffect(() => { startBench(() => benchApi.current); }, []);
 
-  const pickCtx = (name: string) => submit(`kx set --context ${name} && kx sync`);
+  // Plugins run commands in, and read the prompt context of, the focused pane's tab.
+  const focusedSid = focusedPane === "right" && splitSessionId ? splitSessionId : activeId;
+  useEffect(() => { setPluginActiveTab(focusedSid); }, [focusedSid]);
+  useEffect(() => { setPluginCommandRunner((cmd) => { void submitRef.current(cmd, focusedSidRef.current); }); }, []);
 
   const renderPane = (paneSessionId: string, isFocused: boolean) => {
     const pane = sessions.find((s) => s.id === paneSessionId) ?? sessions[0]!;
@@ -1141,11 +1117,6 @@ function Daimon() {
         <div className={`sticky bottom-0 border-t border-border bg-background/60 glass chrome-surface${paneHideBar ? " hidden" : ""}`}>
           {showPowerline && isFocused && (
             <PowerlineStatus
-              k8sContext={k8sContext}
-              k8sNamespace={k8sNamespace}
-              osRegion={osRegion}
-              osProject={osProject}
-              osDomain={osDomain}
               gitBranch={gitBranch}
               gitDirty={gitDirty}
               gitAdded={gitAdded}
@@ -1540,23 +1511,7 @@ function Daimon() {
             </div>
           </div>
 
-          {showBadges && !showPowerline && <HeaderExtensionSlot extensions={[<OpenStackBadge region={osRegion} project={osProject} domain={osDomain} />]} />}
-
-          {/* Kubernetes context widget — only when k8s context is set. Hidden while powerline is on (powerline shows it instead). */}
-          {showBadges && !showPowerline && k8sContext && (
-            <div className="no-drag flex items-center gap-2.5 rounded-md border border-border/40 bg-card/60 veil-surface px-2.5 py-1">
-              <img src={kubernetesIcon} alt="Kubernetes" className="size-3.5 shrink-0" />
-              <div className="flex items-center gap-1.5 font-mono text-[11px]">
-                <span className="text-[#326DE6]/90 font-medium">{k8sContext}</span>
-                {k8sNamespace && k8sNamespace !== "default" && (
-                  <>
-                    <span className="text-muted-foreground/40">·</span>
-                    <span className="text-foreground/80">{k8sNamespace}</span>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
+          {showBadges && !showPowerline && <StatusItemSlot variant="badge" />}
 
           <div className="no-drag ml-auto flex items-center gap-3">
             <span className="hidden font-mono text-[11px] tabular-nums text-muted-foreground sm:inline">
@@ -1580,7 +1535,6 @@ function Daimon() {
             </button>
             <div className="flex items-stretch gap-1.5">
               <HeaderButtonSlot />
-              <ContextSwitcher ctxName={active.state.ctx.name} onPick={pickCtx} forceOpen={ctxSwitcherOpen} forceClose={ctxSwitcherClose} onOpenChange={(o) => { ctxSwitcherIsOpen.current = o; if (!o) refocusComposer(); }} />
             </div>
           </div>
         </header>

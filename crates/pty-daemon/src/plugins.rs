@@ -84,12 +84,39 @@ pub async fn watch(events: mpsc::Sender<SessionEvent>) {
     }
 }
 
+/// Stores the env var names plugins asked for (`watchEnv`) where `daimon precmd` reads
+/// them, so each prompt's context carries their values. Only rewritten on change.
+pub fn set_context_env(names: &[String]) -> std::io::Result<()> {
+    let dir = dirs::data_dir().ok_or(std::io::ErrorKind::NotFound)?.join("daimon");
+    let path = dir.join("context-env");
+    let mut names: Vec<&str> = names
+        .iter()
+        .map(|n| n.trim())
+        .filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    let content: String = names.iter().map(|n| format!("{n}\n")).collect();
+    if std::fs::read_to_string(&path).ok().as_deref() == Some(content.as_str()) {
+        return Ok(());
+    }
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(&path, content)
+}
+
 /// Run `cmd args…` (no shell) and collect its output. Times out after `timeout_ms`.
 /// `{ code, stdout, stderr }`; `code` is null when killed by a signal.
-pub async fn exec(cmd: String, args: Vec<String>, cwd: Option<String>, timeout_ms: u64) -> (bool, Value) {
+pub async fn exec(
+    cmd: String,
+    args: Vec<String>,
+    cwd: Option<String>,
+    env: std::collections::HashMap<String, String>,
+    timeout_ms: u64,
+) -> (bool, Value) {
     let mut c = tokio::process::Command::new(&cmd);
     c.args(&args)
         .env("PATH", crate::shell_env::path())
+        .envs(env)
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true);
     if let Some(dir) = cwd.filter(|d| !d.is_empty()) {

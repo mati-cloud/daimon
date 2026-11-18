@@ -1685,13 +1685,13 @@ function LogfmtView({ lines }: { lines: Record<string, string>[] }) {
 function parseKubeCmd(input: string): { kubeCmd: string; resource: string; namespace?: string; isDescribe?: boolean } | null {
   const t = input.trim();
   // kubectl get <resource> — expandable rows
-  const getM = t.match(/^(kx\s+kubectl|kx\s+k|kubectl|k)\s+get\s+(\S+)(?:\s+.*)?$/);
+  const getM = t.match(/^(kubectl|k)\s+get\s+(\S+)(?:\s+.*)?$/);
   if (getM) {
     const nsM = t.match(/(?:-n|--namespace)\s+(\S+)/);
     return { kubeCmd: getM[1]!.replace(/\s+/, " "), resource: getM[2]!, ...(nsM?.[1] ? { namespace: nsM[1] } : {}) };
   }
   // kubectl describe <resource> <name> — whole output is one describe
-  const descM = t.match(/^(kx\s+kubectl|kx\s+k|kubectl|k)\s+describe\s+(\S+)\s+(\S+)(?:\s+.*)?$/);
+  const descM = t.match(/^(kubectl|k)\s+describe\s+(\S+)\s+(\S+)(?:\s+.*)?$/);
   if (descM) {
     const nsM = t.match(/(?:-n|--namespace)\s+(\S+)/);
     return { kubeCmd: descM[1]!.replace(/\s+/, " "), resource: descM[2]!, ...(nsM?.[1] ? { namespace: nsM[1] } : {}), isDescribe: true as const };
@@ -1796,14 +1796,8 @@ function NodeDetailPanel({ json, nodeName, ctx }: { json: string; nodeName: stri
   const L = p.labels;
   const region   = L["topology.kubernetes.io/region"]   ?? L["failure-domain.beta.kubernetes.io/region"] ?? "";
   const zone     = L["topology.kubernetes.io/zone"]     ?? L["failure-domain.beta.kubernetes.io/zone"]   ?? "";
-  const cluster  = L["example.com/cluster"] ?? "";
-  const pool     = L["worker.gardener.cloud/pool"]      ?? L["example.com/group"]          ?? "";
-  const hw       = L["example.com/type"] ?? "";
-  const bb       = L["example.com/bb"]   ?? "";
-  const nodename = L["example.com/nodename"] ?? "";
-  const maintState   = L["example.com/maintenance-state"]   ?? "";
-  const maintProfile = L["example.com/maintenance-profile"] ?? "";
-  const clusterRole  = cluster.startsWith("m-") ? "metal" : cluster.startsWith("rt-") ? "runtime" : cluster.startsWith("mgmt-") ? "mgmt" : "";
+  const pool     = L["worker.gardener.cloud/pool"] ?? L["eks.amazonaws.com/nodegroup"] ?? L["cloud.google.com/gke-nodepool"] ?? L["kubernetes.azure.com/agentpool"] ?? "";
+  const hw       = L["node.kubernetes.io/instance-type"] ?? L["beta.kubernetes.io/instance-type"] ?? "";
 
   const ni = p.nodeInfo;
   const kubelet = ni["kubeletVersion"] ?? "";
@@ -1818,10 +1812,8 @@ function NodeDetailPanel({ json, nodeName, ctx }: { json: string; nodeName: stri
   const slots: [string, string][] = [
     ["region",   region],
     ["zone",     zone],
-    ["cluster",  clusterRole ? `${cluster} (${clusterRole})` : cluster],
     ["pool",     pool],
-    ["hardware", hw],
-    ["node",     [bb, nodename].filter(Boolean).join(" · ")],
+    ["instance", hw],
   ].filter(([, v]) => v) as [string, string][];
 
   const StatCard = ({ label, value }: { label: string; value: string }) => (
@@ -1862,14 +1854,6 @@ function NodeDetailPanel({ json, nodeName, ctx }: { json: string; nodeName: stri
           {pods    && <span><span className="text-muted-foreground/50 text-[11px] mr-1.5">pods</span>{pods}</span>}
           {kubelet && <span><span className="text-muted-foreground/50 text-[11px] mr-1.5">kubelet</span>{kubelet}</span>}
           {runtime && <span><span className="text-muted-foreground/50 text-[11px] mr-1.5">runtime</span>{runtime}</span>}
-        </div>
-      )}
-
-      {/* Maintenance */}
-      {maintState && maintState !== "operational" && (
-        <div className="font-mono text-[15px] text-amber-400">
-          <span className="text-[11px] mr-1.5 text-amber-400/60">maintenance</span>
-          {maintState}{maintProfile ? ` / ${maintProfile}` : ""}
         </div>
       )}
 

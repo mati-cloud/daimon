@@ -59,12 +59,6 @@ pub enum SessionCommand {
     GitBranch { req_id: String, cwd: String },
     /// Run `git --no-pager diff` with optional extra args in cwd.
     GitDiff { req_id: String, cwd: String, args: Vec<String> },
-    /// List k8s contexts from kubeconfig.
-    ListContexts { req_id: String },
-    /// Run `kx sync` to refresh kubeconfig.
-    SyncContexts { req_id: String },
-    /// List OpenStack regions.
-    ListRegions { req_id: String },
     /// List filesystem paths for autocomplete.
     ListPaths { req_id: String, prefix: String, cwd: String, kind: String },
     /// Full completion: specs + filesystem + manpages via gc-suggest.
@@ -105,8 +99,11 @@ pub enum SessionCommand {
         cmd: String,
         #[serde(default)] args: Vec<String>,
         #[serde(default)] cwd: Option<String>,
+        #[serde(default)] env: std::collections::HashMap<String, String>,
         #[serde(default = "default_exec_timeout")] timeout_ms: u64,
     },
+    /// The env vars plugins want in each prompt's context (`watchEnv`).
+    SetContextEnv { req_id: String, names: Vec<String> },
 }
 
 fn default_exec_timeout() -> u64 { 10_000 }

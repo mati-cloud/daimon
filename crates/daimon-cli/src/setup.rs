@@ -1,5 +1,5 @@
 /// First-launch configurator. Idempotent — safe to re-run from command palette.
-/// Detects installed tools, writes ~/.config/daimon/config.zsh with opt-in modules.
+/// Writes ~/.config/daimon/config.zsh, which puts the daimon CLI on PATH.
 pub fn run() -> anyhow::Result<()> {
     let config_dir = dirs::home_dir()
         .map(|h| h.join(".config").join("daimon"))
@@ -24,30 +24,6 @@ pub fn run() -> anyhow::Result<()> {
         lines.push(String::new());
     }
 
-    // kubectl
-    if which("kubectl") {
-        eprintln!("✓ kubectl detected");
-        lines.push("# k8s context — read once at session init".into());
-        lines.push("export KUBECTL_CONTEXT=$(kubectl config current-context 2>/dev/null || true)".into());
-        lines.push("export KUBECTL_NAMESPACE=$(kubectl config view --minify --output 'jsonpath={..namespace}' 2>/dev/null || true)".into());
-        lines.push(String::new());
-    }
-
-    // OpenStack
-    if std::env::var("OS_AUTH_URL").is_ok() {
-        eprintln!("✓ OpenStack env vars detected");
-        lines.push("# OpenStack — already in env, daimon reads OS_REGION_NAME / OS_PROJECT_NAME / OS_PROJECT_DOMAIN_NAME".into());
-        lines.push(String::new());
-    }
-
-    // cloudctl
-    if which("cloudctl") || which("confluent") {
-        eprintln!("✓ cloudctl detected");
-        lines.push("# cloudctl prompt".into());
-        lines.push("export CLOUD_PROMPT_NOCOLOR=$(cloudctl prompt --no-color 2>/dev/null || true)".into());
-        lines.push(String::new());
-    }
-
     let config_path = config_dir.join("config.zsh");
     std::fs::write(&config_path, lines.join("\n"))?;
     eprintln!("wrote {}", config_path.display());
@@ -66,12 +42,4 @@ pub fn run() -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-fn which(bin: &str) -> bool {
-    std::process::Command::new("which")
-        .arg(bin)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
 }
