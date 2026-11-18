@@ -2,6 +2,11 @@ name: build
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Release to build and attach the installers to (empty = build only)
+        type: string
+        required: false
   workflow_call:
     inputs:
       tag:
@@ -36,6 +41,9 @@ jobs:
             runner: blacksmith-6vcpu-macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A release's own code; empty (manual build without a tag) = the dispatched ref.
+          ref: ${{ inputs.tag }}
 
       - name: System dependencies
         if: matrix.os == 'linux'
