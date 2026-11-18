@@ -44,4 +44,14 @@ export default {
     linux: { bundleCEF: false, icon: "assets/icon.png" },
     win:   { bundleCEF: false, icon: "assets/icon.ico" },
   },
+  // Auto-update (src/bun/updater.ts): the installed app fetches
+  // `<baseUrl>/stable-<os>-<arch>-update-v2.json` and the .tar.zst it names. The release
+  // workflow attaches both to each GitHub release; `latest/download` follows the newest.
+  // DAIMON_UPDATE_URL at build time points a build elsewhere (e.g. a local server, to test).
+  release: {
+    baseUrl: process.env.DAIMON_UPDATE_URL || "https://github.com/mati-cloud/daimon/releases/latest/download",
+    // Delta patches would need the previous release's archive at build time; a full
+    // download per update keeps CI simple.
+    generatePatch: false,
+  },
 } satisfies ElectrobunConfig;
