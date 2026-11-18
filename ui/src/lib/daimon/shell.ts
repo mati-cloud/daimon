@@ -634,7 +634,7 @@ export async function run(
         const gb = finalCtx?.gitBranch ?? state.gitBranch;
         const nextState: State = {
           cwd: finalCtx?.pwd ? finalCtx.pwd.split("/").filter(Boolean) : state.cwd,
-          ctx: { ...state.ctx, name: finalCtx?.k8sContext ?? state.ctx.name },
+          ctx: state.ctx,
           ...(gb ? { gitBranch: gb } : {}),
         };
 
@@ -652,7 +652,7 @@ export async function run(
           : (o.length ? o : (cmdCode !== 0 && !detectedTUI) ? [{ kind: "lines", lines: ["(no output)"], tone: "muted" }] : []);
         const finalBlock: Block = {
           ...pendingBlock, ms, code: wasCancelled ? 130 : cmdCode,
-          ctx: finalCtx?.k8sContext ?? state.ctx.name,
+          ctx: state.ctx.name,
           out: shown(out),
           pending: false,
         };

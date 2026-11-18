@@ -1,4 +1,4 @@
-/// Out-of-band commands: git queries, k8s/openstack context listing.
+/// Out-of-band commands: git queries, path listing.
 /// Each returns a serde_json::Value for the Response event.
 
 use serde_json::{json, Value};
@@ -428,35 +428,6 @@ pub fn git_branch(cwd: &str) -> Value {
     }).collect();
 
     json!({ "branches": names, "current": current, "trunk": trunk, "nodes": nodes })
-}
-
-pub fn list_contexts() -> Value {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let kubeconfig = format!("{}/Library/Application Support/kx/.kube/config", home);
-    match run("kubectl", &["config", "get-contexts", "-o", "name", "--kubeconfig", &kubeconfig], None) {
-        Err(_) => {
-            // Fallback: system kubeconfig
-            match run("kubectl", &["config", "get-contexts", "-o", "name"], None) {
-                Err(e) => json!({ "error": e }),
-                Ok(raw) => json!(raw.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect::<Vec<_>>()),
-            }
-        }
-        Ok(raw) => json!(raw.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect::<Vec<_>>()),
-    }
-}
-
-pub fn sync_contexts() -> Value {
-    match run("kx", &["sync"], None) {
-        Ok(_) => json!({ "ok": true }),
-        Err(e) => json!({ "error": e }),
-    }
-}
-
-pub fn list_regions() -> Value {
-    match run("cloud-regions", &["list-regions"], None) {
-        Err(e) => json!({ "error": e }),
-        Ok(raw) => json!(raw.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect::<Vec<_>>()),
-    }
 }
 
 pub fn list_paths(prefix: &str, cwd: &str, kind: &str) -> Value {

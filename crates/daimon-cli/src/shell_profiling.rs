@@ -35,9 +35,9 @@ fn profile_git() -> anyhow::Result<()> {
 }
 
 fn profile_env() -> anyhow::Result<()> {
-    let _ = std::env::var("OS_REGION_NAME");
-    let _ = std::env::var("KUBECTL_CONTEXT");
-    let _ = std::env::var("CLOUD_PROMPT_NOCOLOR");
+    for name in crate::precmd::watched_env_names() {
+        let _ = std::env::var(name);
+    }
     Ok(())
 }
 

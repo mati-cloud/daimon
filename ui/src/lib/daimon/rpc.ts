@@ -37,12 +37,6 @@ async function fetchDevCreds(): Promise<Creds | null> {
 }
 
 export type ShellContext = {
-  region?: string;
-  project?: string;
-  domain?: string;
-  cloudPrompt?: string;
-  k8sContext?: string;
-  k8sNamespace?: string;
   pwd?: string;
   gitBranch?: string;
   gitAhead?: number;
@@ -54,6 +48,8 @@ export type ShellContext = {
   cmdDuration?: number;
   cmdTimestamp?: number;
   promptLen?: number;
+  /** Values of the env vars plugins asked for (`watchEnv`) that are set in the shell. */
+  env?: Record<string, string>;
 };
 
 type DaemonEvent =
@@ -253,6 +249,8 @@ export const shell = {
   },
   ready:  (tabId: string) => { send({ type: "write", tab_id: tabId, data: "" }); return Promise.resolve(); },
   hasReady: (tabId: string) => lastContext.has(tabId),
+  /** The last prompt context of a tab, if it has drawn a prompt. */
+  context: (tabId: string): ShellContext | undefined => lastContext.get(tabId),
   close:  (tabId: string) => { send({ type: "close", tab_id: tabId }); return Promise.resolve(); },
 
   // Stubs — backend support needed for these
@@ -263,9 +261,6 @@ export const shell = {
     request<{ value: string; isDir: boolean }[]>({ type: "listPaths", prefix, cwd, kind }),
   completeNative:      (buffer: string, cwd: string) =>
     request<{ text: string; description?: string; kind: string }[]>({ type: "complete", buffer, cwd }),
-  listRegions:         (cwd?: string) => request<string[]>({ type: "listRegions", cwd: cwd ?? "" }),
-  listContexts:        () => request<string[]>({ type: "listContexts" }),
-  syncContexts:        () => request<void>({ type: "syncContexts" }),
   getCompletions:      () => Promise.resolve([] as { value: string; description?: string }[]),
   getFlagType:         () => Promise.resolve("unknown" as const),
   getBuiltinPathKind:  () => Promise.resolve(null as "file" | "dir" | "path" | null),
@@ -299,11 +294,12 @@ export const shell = {
   /** `plugins`: plugin protocol version; missing on daemons that predate plugins. */
   daemonInfo:          () => request<{ build: string; sessions: number; pid: number; plugins?: number }>({ type: "daemonInfo" }, 15000),
   pluginList:          () => request<{ name: string; file: string; source: string }[]>({ type: "pluginList" }, 15000),
-  exec:                (cmd: string, args: string[] = [], opts: { cwd?: string; timeoutMs?: number } = {}) => {
+  exec:                (cmd: string, args: string[] = [], opts: { cwd?: string; env?: Record<string, string>; timeoutMs?: number } = {}) => {
     const timeoutMs = opts.timeoutMs ?? 10000;
     return request<{ code: number | null; stdout: string; stderr: string }>(
-      { type: "exec", cmd, args, cwd: opts.cwd, timeout_ms: timeoutMs }, timeoutMs + 2000);
+      { type: "exec", cmd, args, cwd: opts.cwd, env: opts.env ?? {}, timeout_ms: timeoutMs }, timeoutMs + 2000);
   },
+  setContextEnv:       (names: string[]) => request<boolean>({ type: "setContextEnv", names }),
   describeResource:    (..._args: unknown[]) => Promise.resolve(""),
   getNodeEvents:       (..._args: unknown[]) => Promise.resolve([] as { type: string; reason: string; age: string; message: string }[]),
 };

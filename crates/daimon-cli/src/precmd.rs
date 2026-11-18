@@ -1,6 +1,6 @@
 /// Emits OSC 133 prompt mark with context JSON.
 /// Called on every precmd — must be fast.
-/// Git info via libgit2 (no subprocess). Env vars read directly.
+/// Git info via the git CLI; env vars that plugins asked for (`watchEnv`).
 pub fn run() -> anyhow::Result<()> {
     let pwd = std::env::var("PWD").unwrap_or_else(|_| {
         std::env::current_dir()
@@ -13,13 +13,6 @@ pub fn run() -> anyhow::Result<()> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
 
-    // kx runs while git does (each is a process start; this hook runs before every prompt).
-    let kx = find_in_path("kx").and_then(|bin| std::process::Command::new(bin)
-        .arg("env")
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok());
     let git = git_info(&pwd);
 
     let mut obj = serde_json::Map::new();
@@ -35,26 +28,13 @@ pub fn run() -> anyhow::Result<()> {
         obj.insert("gitRemoved".into(), serde_json::Value::Number(g.removed.into()));
     }
 
-    // Opt-in context modules — only emit if env vars present (set once at session init)
-    if let Ok(v) = std::env::var("OS_REGION_NAME")          { obj.insert("region".into(),  v.into()); }
-    if let Ok(v) = std::env::var("OS_PROJECT_NAME")         { obj.insert("project".into(), v.into()); }
-    if let Ok(v) = std::env::var("OS_PROJECT_DOMAIN_NAME")  { obj.insert("domain".into(),  v.into()); }
-    if let Ok(v) = std::env::var("CLOUD_PROMPT_NOCOLOR")
-        .or_else(|_| std::env::var("CLOUD_PROMPT"))        { obj.insert("cloudPrompt".into(), v.into()); }
-    // k8s context + namespace. Source priority:
-    //   1. `kx env` — the kx tool stores its per-session selection in a dotenv,
-    //      NOT in kubeconfig's current-context; `kx env` is its stable machine-readable hook.
-    //   2. KUBECTL_CONTEXT / KUBECTL_NAMESPACE env (set at session init for plain kubectl users).
-    //   3. kubeconfig current-context (plain kubectl, no env).
-    let (u8s_ctx, u8s_ns) = u8s_context(kx);
-    match u8s_ctx.or_else(|| std::env::var("KUBECTL_CONTEXT").ok()).or_else(kube_current_context) {
-        Some(ctx) if !ctx.is_empty() => { obj.insert("k8sContext".into(), ctx.into()); }
-        _ => {}
-    }
-    match u8s_ns.or_else(|| std::env::var("KUBECTL_NAMESPACE").ok()) {
-        Some(ns) if !ns.is_empty() => { obj.insert("k8sNamespace".into(), ns.into()); }
-        _ => {}
-    }
+    // Env vars plugins asked for (`watchEnv`), e.g. KUBECONFIG or OS_REGION_NAME: only
+    // the shell has them, and only the requested ones leave it.
+    let env: serde_json::Map<String, serde_json::Value> = watched_env_names()
+        .into_iter()
+        .filter_map(|name| std::env::var(&name).ok().map(|v| (name, v.into())))
+        .collect();
+    obj.insert("env".into(), serde_json::Value::Object(env));
 
     let json = serde_json::Value::Object(obj).to_string();
     // OSC 133 ; A — prompt start, with daimon context payload
@@ -71,55 +51,12 @@ pub struct GitInfo {
     removed: usize,
 }
 
-/// Queries the `kx` tool for its current session context/namespace via `kx env`
-/// (clean `KEY=value` lines, no ANSI). Returns (None, None) if kx is absent or errors —
-/// non-kx users are unaffected. One subprocess per precmd; kx is built as a prompt hook.
-/// `name`'s path in PATH, like the shell would find it. On WSL the Windows directories
-/// (/mnt/<drive>/…) are skipped: looking a program up there takes ~1 ms per directory, so
-/// missing tools (kx) cost ~13 ms on every prompt, and Linux won't run what's there by
-/// that name anyway.
-fn find_in_path(name: &str) -> Option<std::path::PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-    let wsl = std::env::var_os("WSL_DISTRO_NAME").is_some();
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths)
-            .filter(|d| !(wsl && d.starts_with("/mnt/")))
-            .map(|d| d.join(name))
-            .find(|p| p.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
-    })
-}
-
-fn u8s_context(child: Option<std::process::Child>) -> (Option<String>, Option<String>) {
-    let out = match child.map(|c| c.wait_with_output()) {
-        Some(Ok(o)) if o.status.success() => o.stdout,
-        _ => return (None, None),
-    };
-    let text = String::from_utf8_lossy(&out);
-    let mut ctx = None;
-    let mut ns = None;
-    for line in text.lines() {
-        if let Some(v) = line.strip_prefix("KX_CONTEXT=")   { ctx = Some(v.trim().to_string()); }
-        if let Some(v) = line.strip_prefix("KX_NAMESPACE=") { ns  = Some(v.trim().to_string()); }
-    }
-    (ctx, ns)
-}
-
-/// Reads `current-context` from the active kubeconfig (first KUBECONFIG path, else ~/.kube/config).
-/// Line-scan with early exit — the field sits near the top, so this stays cheap even on large files.
-fn kube_current_context() -> Option<String> {
-    use std::io::BufRead;
-    let path = std::env::var("KUBECONFIG")
-        .ok()
-        .and_then(|v| v.split(':').next().map(str::to_string).filter(|s| !s.is_empty()))
-        .or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.kube/config")))?;
-    let file = std::fs::File::open(path).ok()?;
-    for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
-        if let Some(rest) = line.trim_start().strip_prefix("current-context:") {
-            let ctx = rest.trim().trim_matches(|c| c == '"' || c == '\'').to_string();
-            return (!ctx.is_empty()).then_some(ctx);
-        }
-    }
-    None
+/// Names in the file the daemon keeps from the plugins' `watchEnv` calls, one per line.
+pub(crate) fn watched_env_names() -> Vec<String> {
+    let Some(path) = dirs::data_dir().map(|d| d.join("daimon/context-env")) else { return vec![] };
+    std::fs::read_to_string(path)
+        .map(|s| s.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
+        .unwrap_or_default()
 }
 
 pub fn git_info_pub(path: &str) -> Option<GitInfo> { git_info(path) }

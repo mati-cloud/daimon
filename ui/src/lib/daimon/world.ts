@@ -8,7 +8,7 @@ const d = (children: Record<string, Node>): Node => ({ type: "dir", children });
 export const ROOT: Node = d({
   home: d({
     daimon: d({
-      ".config": d({ "daimon.toml": f(412), "ops.yaml": f(1180) }),
+      ".config": d({ "daimon.toml": f(412) }),
       ".kube": d({ config: f(9204), "cache": d({}) }),
       clusters: d({
         "prod.yaml": f(3120),
@@ -72,8 +72,6 @@ export const COMMANDS: Spec[] = [
   { name: "cd", blurb: "Move to another folder", takesPath: true },
   { name: "cat", blurb: "Print a file", takesPath: true },
   { name: "pwd", blurb: "Show where you are" },
-  { name: "kx", blurb: "Manage Kubernetes config", args: ["ctx", "get", "apply", "diff"] },
-  { name: "ops", blurb: "Cloud operations", args: ["status", "regions", "quota", "rotate"] },
   { name: "kubectl", blurb: "Talk to the cluster", args: ["get", "describe", "logs", "top"] },
   { name: "git", blurb: "Version control", args: ["status", "log", "diff", "push"] },
   { name: "help", blurb: "What daimon can do" },

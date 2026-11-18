@@ -11,7 +11,7 @@ const PROGRAMS: Record<CommandKind, string[]> = {
   codex: ["codex"],
   git: ["git", "lazygit", "tig", "gitui"],
   github: ["gh"],
-  kubernetes: ["kubectl", "k9s", "helm", "helmfile", "kubectx", "kubens", "minikube", "kind", "k3d", "stern", "kustomize", "kx"],
+  kubernetes: ["kubectl", "k9s", "helm", "helmfile", "kubectx", "kubens", "minikube", "kind", "k3d", "stern", "kustomize"],
   openstack: ["openstack", "nova", "neutron", "glance", "cinder", "heat", "swift", "keystone"],
   docker: ["docker", "docker-compose", "podman", "lazydocker", "nerdctl"],
   ssh: ["ssh", "mosh", "sftp", "scp", "telnet"],

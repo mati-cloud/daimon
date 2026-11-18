@@ -6,6 +6,33 @@ declare module "daimon" {
   import type { ComponentType, ReactNode, createElement } from "react";
 
   export type ExecResult = { code: number | null; stdout: string; stderr: string };
+
+  /** The focused shell's state at its last prompt. */
+  export type ShellContext = {
+    pwd?: string;
+    exitCode?: number;
+    gitBranch?: string;
+    gitDirty?: boolean;
+    gitAhead?: number;
+    gitBehind?: number;
+    gitAdded?: number;
+    gitRemoved?: number;
+    /** Values of the env vars asked for with `watchEnv` that are set in the shell. */
+    env?: Record<string, string>;
+  };
+
+  /** A status item: a header badge or a powerline segment, per the user's settings. */
+  export type StatusItem = {
+    /** Small icon, e.g. <img src="data:image/svg+xml;base64,…" /> or an inline <svg>. */
+    icon?: ReactNode;
+    label: ReactNode;
+    /** Secondary text after a muted "·". */
+    detail?: ReactNode;
+    /** Label color in the badge style (any CSS color). */
+    color?: string;
+    title?: string;
+    onClick?: () => void;
+  };
   type Toast = (message: string, opts?: { description?: string; duration?: number; id?: string }) => string | number;
 
   /** API version; bumped on breaking changes. */
@@ -16,8 +43,26 @@ declare module "daimon" {
   export function html(strings: TemplateStringsArray, ...values: unknown[]): ReactNode;
   /** Put a button/badge into the header's right side. Registering an id again replaces it. */
   export function registerHeaderButton(id: string, render: ComponentType | ReactNode): void;
-  /** Run a program (no shell). Rejects on spawn failure or timeout (default 10 s). */
-  export function exec(cmd: string, args?: string[], opts?: { cwd?: string; timeoutMs?: number }): Promise<ExecResult>;
+  /** Add a status item. `use` runs while rendering, so it may call hooks (e.g.
+   *  useShellContext); return null to show nothing. Registering an id again replaces it. */
+  export function registerStatusItem(id: string, use: () => StatusItem | null): void;
+  /** Global keyboard shortcut, e.g. "mod+j", "mod+shift+k", "alt+1" (`mod` = ⌘ or Ctrl).
+   *  Wins over daimon's own shortcuts. Registering an id again replaces it. */
+  export function registerShortcut(id: string, combo: string, handler: (e: KeyboardEvent) => void): void;
+  /** The focused shell's prompt context; re-renders after every prompt. */
+  export function useShellContext(): ShellContext;
+  /** Calls `fn` now and after every prompt of the focused shell. Returns an unsubscribe. */
+  export function onShellContext(fn: (ctx: ShellContext) => void): () => void;
+  /** Have the shell report these env vars in `ShellContext.env` (from the next prompt on).
+   *  Only the names asked for leave the shell. */
+  export function watchEnv(names: string | string[]): void;
+  /** Run a command line in the focused tab, as if typed. */
+  export function runCommand(command: string): void;
+  /** Move keyboard focus back to the focused tab's command input. */
+  export function focusComposer(): void;
+  /** Run a program (no shell). Rejects on spawn failure or timeout (default 10 s). `env`
+   *  adds variables, e.g. the shell's KUBECONFIG from `useShellContext().env`. */
+  export function exec(cmd: string, args?: string[], opts?: { cwd?: string; env?: Record<string, string>; timeoutMs?: number }): Promise<ExecResult>;
   /** Persistent key/value strings (shared with daimon's own prefs: prefix your keys). */
   export function prefGet(key: string): Promise<string | null>;
   export function prefSet(key: string, value: string): Promise<boolean>;
