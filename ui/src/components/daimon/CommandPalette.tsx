@@ -15,6 +15,7 @@ import {
   CheckCircleIcon,
   XIcon as XCircle2Icon,
   ServerIcon,
+  DownloadIcon,
 } from "lucide-react";
 import { Keys } from "./Kbd";
 import { shell } from "@/lib/daimon/rpc";
@@ -52,6 +53,7 @@ const COMMAND_ICONS: Record<string, React.FC<{ className?: string }>> = {
   "sidebar":     PanelLeftIcon,
   "keys":        KeyboardIcon,
   "ssh":         ServerIcon,
+  "update":      DownloadIcon,
 };
 
 type BlockResult = { id: string; input: string; cwd: string; ts: number; exit_code: number };

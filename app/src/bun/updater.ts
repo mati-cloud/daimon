@@ -15,6 +15,14 @@ export type UpdateState =
   | { state: "downloading"; version: string; progress?: number }
   | { state: "ready"; version: string };
 
+/** A manual check's answer ("Check for updates" in the command palette). */
+export type CheckResult =
+  | { result: "up-to-date"; version: string }
+  | { result: "available"; version: string } // downloading, or ready: the sidebar shows which
+  | { result: "busy" }                       // a check is already running
+  | { result: "unsupported" }                // dev build
+  | { result: "error"; message: string };
+
 const FIRST_CHECK_MS = 15_000; // after launch, so it doesn't compete with startup
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
@@ -23,9 +31,12 @@ export function startUpdater(isDev: boolean, notify: (s: UpdateState) => void) {
   const set = (s: UpdateState) => { current = s; notify(s); };
 
   if (isDev) {
-    if (process.env.DAIMON_UPDATE_DEMO === "1") demo(set);
+    const isDemo = process.env.DAIMON_UPDATE_DEMO === "1";
+    if (isDemo) demo(set);
     return {
       state: () => current,
+      check: async (): Promise<CheckResult> =>
+        isDemo ? { result: "available", version: "9.9.9" } : { result: "unsupported" },
       apply: () => appLog("[update] demo: would restart into", current.state === "ready" ? current.version : "-"),
     };
   }
@@ -39,16 +50,38 @@ export function startUpdater(isDev: boolean, notify: (s: UpdateState) => void) {
   });
 
   let busy = false;
-  async function check() {
-    if (busy || current.state === "ready") return;
+  /** Checks, then downloads a newer build in the background; resolves once the check is done. */
+  async function check(): Promise<CheckResult> {
+    if (current.state === "ready") return { result: "available", version: current.version };
+    if (current.state === "downloading") return { result: "available", version: current.version };
+    if (busy) return { result: "busy" };
     busy = true;
+    let info;
     try {
-      const info = await Updater.checkForUpdate();
-      if (info.error) return void appWarn("[update] check failed:", info.error);
-      if (!info.updateAvailable) return;
-      appLog("[update] available:", info.version);
-      if (!info.updateReady) {
-        set({ state: "downloading", version: info.version });
+      info = await Updater.checkForUpdate();
+    } catch (err) {
+      busy = false;
+      appWarn("[update] check failed:", err);
+      return { result: "error", message: err instanceof Error ? err.message : String(err) };
+    }
+    if (info.error) {
+      busy = false;
+      appWarn("[update] check failed:", info.error);
+      return { result: "error", message: info.error };
+    }
+    if (!info.updateAvailable) {
+      busy = false;
+      return { result: "up-to-date", version: await Updater.localInfo.version() };
+    }
+    appLog("[update] available:", info.version);
+    void download(info.version, info.updateReady).finally(() => { busy = false; });
+    return { result: "available", version: info.version };
+  }
+
+  async function download(version: string, alreadyReady: boolean) {
+    try {
+      if (!alreadyReady) {
+        set({ state: "downloading", version });
         await Updater.downloadUpdate();
       }
       const after = Updater.updateInfo();
@@ -60,10 +93,8 @@ export function startUpdater(isDev: boolean, notify: (s: UpdateState) => void) {
         set({ state: "none" });
       }
     } catch (err) {
-      appWarn("[update] failed:", err);
-      if (current.state === "downloading") set({ state: "none" });
-    } finally {
-      busy = false;
+      appWarn("[update] download failed:", err);
+      set({ state: "none" });
     }
   }
 
@@ -72,6 +103,7 @@ export function startUpdater(isDev: boolean, notify: (s: UpdateState) => void) {
 
   return {
     state: () => current,
+    check,
     apply: () => {
       if (current.state !== "ready") return;
       appLog("[update] restarting into", current.version);

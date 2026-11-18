@@ -238,8 +238,9 @@ if (isWindows && nativeTransparent) {
 console.log("[main] window opened →", frontendUrl.replace(/daimon_token=[^&]+/, "daimon_token=…"));
 
 // Auto-update (see updater.ts). The page shows the state from `daimon:update` events and
-// sends { type: "update", action: "state" } on load (it may miss earlier events) and
-// { type: "update", action: "apply" } from its restart button.
+// sends { type: "update", action: "state" } on load (it may miss earlier events),
+// { type: "update", action: "apply" } from its restart button and
+// { type: "update", action: "check" } from the command palette, answered with `daimon:update-check`.
 const updater = startUpdater(isDev, (state) => sendUpdateState(state));
 function sendUpdateState(state: UpdateState) {
   win.webview.executeJavascript(
@@ -250,6 +251,11 @@ hostMessageHandlers.push((msg) => {
   if (msg.type !== "update") return;
   if (msg.action === "state") sendUpdateState(updater.state());
   else if (msg.action === "apply") updater.apply();
+  else if (msg.action === "check") {
+    void updater.check().then((result) => win.webview.executeJavascript(
+      `window.dispatchEvent(new CustomEvent("daimon:update-check", { detail: ${JSON.stringify(result)} }))`,
+    ));
+  }
 });
 
 // Open a URL in the system default browser via Electrobun's native API.
