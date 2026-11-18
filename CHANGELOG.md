@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/mati-cloud/daimon/compare/v0.5.0...v0.5.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **ui:** strip foreign OSC sequences from plain command output ([8d77abc](https://github.com/mati-cloud/daimon/commit/8d77abcaafff5d0f4f60a909787861cfbd092eb0))
+* **ui:** strip foreign OSC sequences from plain command output ([09cafdb](https://github.com/mati-cloud/daimon/commit/09cafdbf96d21601224f738a50ac211547b26d66))
+
 ## [0.5.0](https://github.com/mati-cloud/daimon/compare/v0.4.0...v0.5.0) (2026-11-18)
 
 
