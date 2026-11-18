@@ -114,7 +114,7 @@ fn default_exec_timeout() -> u64 { 10_000 }
 /// Pick the shell to run: the user's $SHELL if daimon has integration for it (zsh, bash,
 /// fish), else zsh, else bash, since without integration there are no blocks.
 /// DAIMON_SHELL overrides it, integration or not.
-fn pick_shell() -> (String, Option<Shell>) {
+pub(crate) fn pick_shell() -> (String, Option<Shell>) {
     if let Ok(s) = std::env::var("DAIMON_SHELL") {
         let kind = Shell::of(&s);
         return (s, kind);
@@ -319,6 +319,11 @@ impl Session {
 
         let (shell, kind) = pick_shell();
         let mut cmd = CommandBuilder::new(&shell);
+        // The daemon's own PATH is the shell's resolved one (shell_env.rs); the shell runs
+        // its startup files itself, so it starts from what the daemon inherited.
+        if let Some(path) = crate::shell_env::inherited_path() {
+            cmd.env("PATH", path);
+        }
         if let Some(home) = dirs::home_dir() {
             cmd.cwd(home);
         }
