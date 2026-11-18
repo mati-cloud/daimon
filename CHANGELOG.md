@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.0](https://github.com/mati-cloud/daimon/compare/v0.6.1...v0.7.0) (2026-11-18)
+
+
+### Features
+
+* "Check for updates" in the command palette ([3bb8399](https://github.com/mati-cloud/daimon/commit/3bb83998d2e210df877e09384889b0e48da60578))
+* **linux:** bundle CEF for WebGPU, custom frameless window and sharp TUI zoom ([746fe03](https://github.com/mati-cloud/daimon/commit/746fe0376342d75a43fa5715f33c860d6e9c97c5))
+* **linux:** detect compositor blur and gate glass settings until see-through windows take keyboard input ([58bc498](https://github.com/mati-cloud/daimon/commit/58bc498f93f8ba7501c9d59a8fdaef47ee2fff42))
+* **ui:** show update progress and failures in the sidebar ([ef9ced7](https://github.com/mati-cloud/daimon/commit/ef9ced7aa61f24293210504b94a361b701a590f2))
+
+
+### Bug Fixes
+
+* **linux:** disable background blur, compositors offer no per-app blur radius ([3007f70](https://github.com/mati-cloud/daimon/commit/3007f70e6155a00eb5ea139e439bad13d0cb3e10))
+* **ui:** fall back to xterm's DOM renderer when WebGPU is missing ([ab66d9d](https://github.com/mati-cloud/daimon/commit/ab66d9d3f47d40db7d7f27ffd4171e9255feffff))
+
 ## [0.6.1](https://github.com/mati-cloud/daimon/compare/v0.6.0...v0.6.1) (2026-11-18)
 
 
