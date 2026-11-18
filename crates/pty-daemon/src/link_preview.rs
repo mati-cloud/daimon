@@ -64,6 +64,7 @@ fn allowed(url: &str) -> bool {
 
 fn fetch(url: &str) -> Option<String> {
     let mut child = Command::new("curl")
+        .env("PATH", crate::shell_env::path())
         .args([
             "-sSL",
             "--compressed",

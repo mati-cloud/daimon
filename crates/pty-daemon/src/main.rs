@@ -6,6 +6,7 @@ mod kitty_graphics;
 mod link_preview;
 mod plugins;
 mod session;
+mod shell_env;
 mod store;
 mod ws;
 
@@ -42,6 +43,9 @@ fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("pty_daemon=debug".parse()?))
         .init();
+
+    // PATH for the commands the daemon runs (see shell_env.rs).
+    shell_env::init();
 
     if has("--exit-with-parent") {
         std::thread::spawn(|| {
