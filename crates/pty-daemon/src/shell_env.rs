@@ -143,12 +143,29 @@ fn merge(lists: &[Vec<PathBuf>]) -> OsString {
 /// files print.
 fn login_shell_path() -> Option<OsString> {
     let (shell, _) = crate::session::pick_shell();
-    let mut child = Command::new(&shell)
-        .args(["-l", "-i", "-c", &format!("echo {MARKER}; command printenv PATH")])
+    let mut cmd = Command::new(&shell);
+    cmd.args(["-l", "-i", "-c", &format!("echo {MARKER}; command printenv PATH")])
         .env("DAIMON_RESOLVING_ENV", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    // Its own session, without a terminal. An interactive shell that finds one (the
+    // daemon run from a terminal, in the background) and isn't its foreground group
+    // stops its process group with SIGTTIN — which would be the daemon's group.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: setsid is async-signal-safe; nothing else runs between fork and exec.
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+    let mut child = cmd
         .spawn()
         .map_err(|err| tracing::warn!("PATH: can't run {shell}: {err}"))
         .ok()?;
