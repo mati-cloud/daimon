@@ -19,6 +19,7 @@ import { KeyboardShortcutsModal } from "@/components/daimon/KeyboardShortcutsMod
 import { SettingsModal } from "@/components/daimon/SettingsModal";
 import { PowerlineStatus } from "@/components/daimon/PowerlineStatus";
 import { TitleBar } from "@/components/daimon/TitleBar";
+import { UpdatePill } from "@/components/daimon/UpdatePill";
 import { describeEl, focusLog, requestPageFocus } from "@/lib/daimon/focusLog";
 import { usePresence } from "@/lib/daimon/presence";
 
@@ -1424,6 +1425,7 @@ function Daimon() {
           })()}
         </div>
 
+        <UpdatePill />
       </aside>
 
       {/* Main */}

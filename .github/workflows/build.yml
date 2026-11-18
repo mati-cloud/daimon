@@ -78,6 +78,11 @@ jobs:
           fi
           [ -n "$src" ] || { echo "::error::no installer in app/artifacts"; ls -R app/artifacts; exit 1; }
           cp "$src" "$dest"
+          # Auto-update payload (app/src/bun/updater.ts): the installed app reads
+          # stable-<os>-<arch>-update-v2.json from the latest release, then the .tar.zst it names.
+          update=$(ls app/artifacts/stable-${{ matrix.os }}-${{ matrix.arch }}-update*.json app/artifacts/stable-${{ matrix.os }}-${{ matrix.arch }}-*.tar.zst 2>/dev/null || true)
+          [ -n "$update" ] || { echo "::error::no update manifest/archive in app/artifacts"; ls -R app/artifacts; exit 1; }
+          cp $update release/
           ls -la release
 
       - uses: actions/upload-artifact@v4
