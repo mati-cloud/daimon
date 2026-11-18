@@ -13,6 +13,7 @@ import { describeFocus, isForeground } from "./winFocus";
 import { focusLog } from "./focusLog";
 import { prepareCustomFrame, startTopResize } from "./winFrame";
 import { setWindowIcon } from "./winIcon";
+import { startUpdater, type UpdateState } from "./updater";
 import { resolve } from "node:path";
 
 // ── pty-daemon ────────────────────────────────────────────────────────────────
@@ -235,6 +236,21 @@ if (isWindows && nativeTransparent) {
 }
 
 console.log("[main] window opened →", frontendUrl.replace(/daimon_token=[^&]+/, "daimon_token=…"));
+
+// Auto-update (see updater.ts). The page shows the state from `daimon:update` events and
+// sends { type: "update", action: "state" } on load (it may miss earlier events) and
+// { type: "update", action: "apply" } from its restart button.
+const updater = startUpdater(isDev, (state) => sendUpdateState(state));
+function sendUpdateState(state: UpdateState) {
+  win.webview.executeJavascript(
+    `window.dispatchEvent(new CustomEvent("daimon:update", { detail: ${JSON.stringify(state)} }))`,
+  );
+}
+hostMessageHandlers.push((msg) => {
+  if (msg.type !== "update") return;
+  if (msg.action === "state") sendUpdateState(updater.state());
+  else if (msg.action === "apply") updater.apply();
+});
 
 // Open a URL in the system default browser via Electrobun's native API.
 hostMessageHandlers.push((msg) => {
