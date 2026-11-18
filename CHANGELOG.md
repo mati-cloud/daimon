@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/mati-cloud/daimon/compare/v0.5.1...v0.6.0) (2026-11-18)
+
+
+### Features
+
+* auto-update from GitHub releases ([1e30fa6](https://github.com/mati-cloud/daimon/commit/1e30fa64a11aaee32d9438c257f2d71e8ae0a94c))
+* auto-update from GitHub releases ([a8d0899](https://github.com/mati-cloud/daimon/commit/a8d08998ac397cb0465223f761a7cea599db1b0e))
+
 ## [0.5.1](https://github.com/mati-cloud/daimon/compare/v0.5.0...v0.5.1) (2026-11-18)
 
 
