@@ -88,7 +88,10 @@ pub async fn watch(events: mpsc::Sender<SessionEvent>) {
 /// `{ code, stdout, stderr }`; `code` is null when killed by a signal.
 pub async fn exec(cmd: String, args: Vec<String>, cwd: Option<String>, timeout_ms: u64) -> (bool, Value) {
     let mut c = tokio::process::Command::new(&cmd);
-    c.args(&args).stdin(std::process::Stdio::null()).kill_on_drop(true);
+    c.args(&args)
+        .env("PATH", crate::shell_env::path())
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
     if let Some(dir) = cwd.filter(|d| !d.is_empty()) {
         c.current_dir(dir);
     }

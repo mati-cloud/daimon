@@ -6,7 +6,7 @@ use std::process::Command;
 
 fn run(cmd: &str, args: &[&str], cwd: Option<&str>) -> Result<String, String> {
     let mut c = Command::new(cmd);
-    c.args(args);
+    c.args(args).env("PATH", crate::shell_env::path());
     if let Some(dir) = cwd {
         c.current_dir(dir);
     }
