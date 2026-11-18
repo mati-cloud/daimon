@@ -14,6 +14,7 @@ import { focusLog } from "./focusLog";
 import { prepareCustomFrame, startTopResize } from "./winFrame";
 import { setWindowIcon } from "./winIcon";
 import { startUpdater, type UpdateState } from "./updater";
+import { startLinuxResize, type ResizeEdge } from "./linuxResize";
 import { resolve } from "node:path";
 
 // ── pty-daemon ────────────────────────────────────────────────────────────────
@@ -26,6 +27,9 @@ const daemon = await connectDaemon(isDev);
 // (WebKitGTK) a transparent window doesn't repaint (content only shows while
 // resizing), so it's opt-in there via DAIMON_TRANSPARENT=1.
 const isWindows = process.platform === "win32";
+// Windows and Linux: no system title bar — the page draws the caption (drag strip and
+// minimize / maximize / close, TitleBar.tsx). macOS keeps its native traffic lights.
+const customFrame = isWindows || process.platform === "linux";
 const nativeTransparent =
   process.env.DAIMON_TRANSPARENT === "1" ||
   ((process.platform === "darwin" || isWindows) && process.env.DAIMON_TRANSPARENT !== "0");
@@ -40,8 +44,8 @@ const query = [
   daemon && `daimon_port=${daemon.port}`,
   nativeTransparent && "transparent=1",
   nativeTransparent && isWindows && (variableBlur ? "blur=variable" : "blur=steps"),
-  // The page draws the title bar (drag strip + minimize / maximize / close): see winFrame.ts.
-  isWindows && "frame=custom",
+  // The page draws the title bar (drag strip + minimize / maximize / close): TitleBar.tsx.
+  customFrame && "frame=custom",
   // Benchmark mode: the UI runs these commands and records timings (see ui/src/lib/daimon/bench.ts).
   process.env.DAIMON_BENCH && `bench=${encodeURIComponent(process.env.DAIMON_BENCH)}`,
 ].filter(Boolean);
@@ -98,7 +102,10 @@ const win = new BrowserWindow({
   transparent: nativeTransparent,
   // Custom HTML titlebar: hide the native title bar. macOS keeps its traffic lights
   // inset; Windows keeps the resizable frame and the page draws the window buttons.
+  // Linux (CEF): only "hidden" drops the GTK title bar, and with it the resize borders —
+  // the page's edge strips resize through linuxResize.ts.
   ...((process.platform === "darwin" || isWindows) && { titleBarStyle: "hiddenInset" as const }),
+  ...(process.platform === "linux" && { titleBarStyle: "hidden" as const }),
   ...(process.platform === "darwin" && { trafficLightOffset: { x: 16, y: 14 } }),
 });
 
@@ -145,7 +152,7 @@ win.on("focus", () => returnFocusToPage("native focus"));
 win.on("blur", () => focusLog("host", `native blur ${describeFocus(win.ptr)}`));
 
 // Messages from the page: window.__electrobunSendToHost({ type, ... }).
-type HostMessage = { type?: string; blur?: unknown; action?: unknown; msg?: unknown };
+type HostMessage = { type?: string; blur?: unknown; action?: unknown; msg?: unknown; edge?: unknown };
 const hostMessageHandlers: ((msg: HostMessage) => void)[] = [];
 (win.webview as unknown as { on(name: string, handler: (event: unknown) => void): void }).on(
   "host-message",
@@ -159,10 +166,10 @@ hostMessageHandlers.push((msg) => {
   if (msg.type === "focus-log" && typeof msg.msg === "string") focusLog("page", msg.msg);
 });
 
-// Windows: the page's title bar. Its buttons arrive as { type: "window", action }, and
-// it is told when the window is (un)maximized so it can swap the maximize/restore icon.
-if (isWindows) {
-  if (!prepareCustomFrame(win.ptr, nativeTransparent)) console.warn("[main] couldn't set up the custom window frame");
+// Windows and Linux: the page's title bar. Its buttons arrive as { type: "window", action },
+// and it is told when the window is (un)maximized so it can swap the maximize/restore icon.
+if (customFrame) {
+  if (isWindows && !prepareCustomFrame(win.ptr, nativeTransparent)) console.warn("[main] couldn't set up the custom window frame");
   let maximized: boolean | null = null;
   const reportState = (force = false) => {
     const now = win.isMaximized();
@@ -184,14 +191,22 @@ if (isWindows) {
       case "minimize": win.minimize(); break;
       case "maximize": if (win.isMaximized()) win.unmaximize(); else win.maximize(); break;
       case "focus": {
-        // The page wants keyboard focus (see returnFocusToPage). Never steal it from another app.
+        // The page wants keyboard focus (see returnFocusToPage). Windows only (WebView2's
+        // focus tracking); never steal it from another app.
+        if (!isWindows) break;
         const front = isForeground(win.ptr);
         focusLog("host", `page asks for focus → ${front ? "activate" : "not in front, ignored"}`);
         if (front) win.activate();
         break;
       }
       case "close": win.close(); break;
-      case "resize-top": startTopResize(win.ptr); break;
+      case "resize-top": if (isWindows) startTopResize(win.ptr); break;
+      // Linux: the page's edge strips (the undecorated window has no resize borders).
+      case "resize":
+        if (process.platform === "linux" && typeof msg.edge === "string" && !startLinuxResize(msg.edge as ResizeEdge)) {
+          appWarn("[main] couldn't start the window resize");
+        }
+        break;
       case "state": reportState(true); break;
     }
   });

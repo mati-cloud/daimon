@@ -1,4 +1,4 @@
-// The 36px strip along the top of the window.
+// The 36px strip along the top of the window (Windows and Linux: html.custom-frame).
 //
 // macOS: an empty zone — the window is dragged by its background and the traffic
 // lights are native. Windows (html.custom-frame): the native title bar is gone, so this
@@ -9,6 +9,11 @@
 import { useEffect, useState } from "react";
 
 const HEIGHT = 36;
+/** Linux draws the caption too, but nothing acts on `app-region` the way Windows does:
+ *  Electrobun's preload starts the window move when it sees its own class (inside it, its
+ *  no-drag class or a stopped mousedown opts out). Double-click to maximize is ours. The
+ *  window is undecorated (no resize borders), so the edges are ours too: ResizeEdges. */
+const IS_LINUX = /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
 
 type WindowAction = "minimize" | "maximize" | "close" | "resize-top" | "state";
 
@@ -39,13 +44,21 @@ export function TitleBar({ left }: { left?: React.ReactNode }) {
   if (!custom) return <div className="titlebar-drag electrobun-webkit-app-region-drag" style={base} />;
 
   return (
+    <>
+    {IS_LINUX && !maximized && <ResizeEdges />}
     <div
-      className="titlebar-drag flex justify-between"
+      className={`titlebar-drag flex justify-between ${IS_LINUX ? "electrobun-webkit-app-region-drag" : ""}`}
       style={base}
       // The strip overlays the top of the page. Where page content under it opts out of dragging
       // (`no-drag`), Windows hands the click to the webview — but it lands on this strip, so
       // pass it down to the control underneath.
+      onDoubleClick={(e) => {
+        if (IS_LINUX && e.target === e.currentTarget && e.button === 0) sendWindow("maximize");
+      }}
       onMouseDown={(e) => {
+        // Linux: a press on a control (`no-drag`) must not reach Electrobun's document
+        // listener, which would start a window move instead of the click.
+        if (IS_LINUX && (e.target as HTMLElement).closest?.(".no-drag")) { e.stopPropagation(); return; }
         if (e.target !== e.currentTarget || e.button !== 0) return;
         // A press on the caption (to drag, or double-click to maximize) must not move focus
         // out of the command input: Windows does the drag/maximize, the page only blurs.
@@ -53,11 +66,12 @@ export function TitleBar({ left }: { left?: React.ReactNode }) {
         const under = document.elementsFromPoint(e.clientX, e.clientY).find((el) => !e.currentTarget.contains(el));
         const control = under?.closest<HTMLElement>("input, textarea, button, a, [role='button']");
         if (!control) return;
+        if (IS_LINUX) e.stopPropagation(); // a click for the control, not a window move
         if (control.matches("input, textarea")) control.focus(); else control.click();
       }}
     >
       {/* The top resize border went to the client area with the caption. */}
-      {!maximized && (
+      {!maximized && !IS_LINUX && (
         <div
           className="no-drag absolute inset-x-0 top-0 h-1 cursor-ns-resize"
           onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); sendWindow("resize-top"); } }}
@@ -78,6 +92,46 @@ export function TitleBar({ left }: { left?: React.ReactNode }) {
         </WindowButton>
       </div>
     </div>
+    </>
+  );
+}
+
+type Edge = "top-left" | "top" | "top-right" | "right" | "bottom-right" | "bottom" | "bottom-left" | "left";
+const EDGE = 5;    // px: the strips along each side
+const CORNER = 12; // px: the corner squares, a little larger so they are easy to hit
+const EDGES: { edge: Edge; style: React.CSSProperties; cursor: string }[] = [
+  { edge: "top", cursor: "ns-resize", style: { top: 0, left: CORNER, right: CORNER, height: EDGE } },
+  { edge: "bottom", cursor: "ns-resize", style: { bottom: 0, left: CORNER, right: CORNER, height: EDGE } },
+  { edge: "left", cursor: "ew-resize", style: { left: 0, top: CORNER, bottom: CORNER, width: EDGE } },
+  { edge: "right", cursor: "ew-resize", style: { right: 0, top: CORNER, bottom: CORNER, width: EDGE } },
+  { edge: "top-left", cursor: "nwse-resize", style: { top: 0, left: 0, width: CORNER, height: CORNER } },
+  { edge: "bottom-right", cursor: "nwse-resize", style: { bottom: 0, right: 0, width: CORNER, height: CORNER } },
+  { edge: "top-right", cursor: "nesw-resize", style: { top: 0, right: 0, width: CORNER, height: CORNER } },
+  { edge: "bottom-left", cursor: "nesw-resize", style: { bottom: 0, left: 0, width: CORNER, height: CORNER } },
+];
+
+/** Linux: invisible strips along the window's edges; a press asks the host to start a
+ *  window-manager resize from that edge (app/src/bun/linuxResize.ts). */
+function ResizeEdges() {
+  return (
+    <>
+      {EDGES.map(({ edge, style, cursor }) => (
+        <div
+          key={edge}
+          aria-hidden
+          className="no-drag electrobun-webkit-app-region-no-drag"
+          style={{ position: "fixed", zIndex: 10000, cursor, ...style }}
+          onMouseDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation(); // not a window move (Electrobun's document listener)
+            try {
+              (window as { __electrobunSendToHost?: (m: unknown) => void }).__electrobunSendToHost?.({ type: "window", action: "resize", edge });
+            } catch { /* shell bridge unavailable */ }
+          }}
+        />
+      ))}
+    </>
   );
 }
 

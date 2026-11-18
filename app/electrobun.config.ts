@@ -41,7 +41,22 @@ export default {
     copy,
     // App icon, generated from assets/icon.svg.
     mac:   { bundleCEF: false, icons: "assets/icon.iconset" },
-    linux: { bundleCEF: false, icon: "assets/icon.png" },
+    // Linux: Chromium (CEF) instead of WebKitGTK. WebKitGTK has no working WebGPU (the
+    // full-screen terminal's renderer) and stretches a magnified page as a bitmap, where
+    // Chromium re-rasterizes it sharp. Electrobun starts CEF with the GPU off; turn it
+    // back on, and enable Chromium's WebGPU, which needs Vulkan on Linux. (Electrobun
+    // embeds CEF as an X11 child window, so the app runs on XWayland under Wayland.)
+    linux: {
+      bundleCEF: true,
+      defaultRenderer: "cef",
+      icon: "assets/icon.png",
+      chromiumFlags: {
+        "disable-gpu": false,
+        "disable-gpu-compositing": false,
+        "enable-unsafe-webgpu": true,
+        "enable-features": "Vulkan",
+      },
+    },
     win:   { bundleCEF: false, icon: "assets/icon.ico" },
   },
   // Auto-update (src/bun/updater.ts): the installed app fetches

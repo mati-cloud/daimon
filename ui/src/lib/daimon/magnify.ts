@@ -17,6 +17,19 @@ const EASE = 0.22;
 /** Wheel quiet for this long ends a gesture: an overshoot springs back to 100%. */
 const SETTLE_MS = 140;
 
+/** The settled magnification (1 = none), announced with the `daimon:magnify` event
+ *  ({ scale }) once the page stops moving. The browser re-rasterizes the page's HTML at
+ *  the new scale by itself, but a canvas keeps its pixels and is only stretched — the
+ *  full-screen terminal listens and re-renders at the magnified resolution
+ *  (lib/daimon/tuiTerminal.ts). */
+let settledScale = 1;
+export const magnifyScale = () => settledScale;
+function announce(scale: number) {
+  if (scale === settledScale) return;
+  settledScale = scale;
+  window.dispatchEvent(new CustomEvent("daimon:magnify", { detail: { scale } }));
+}
+
 export function installMagnify(target: HTMLElement): () => void {
   // Current (drawn) and target transform: translate(x, y) scale(s), origin top-left.
   let s = 1, x = 0, y = 0;
@@ -55,7 +68,7 @@ export function installMagnify(target: HTMLElement): () => void {
     // Smooth while moving; once still, drop the hint so the text is re-rendered sharp.
     target.style.willChange = done ? "" : "transform";
     apply();
-    if (!done) frame = requestAnimationFrame(step);
+    if (done) announce(s); else frame = requestAnimationFrame(step);
   };
   const animate = () => { if (!frame) frame = requestAnimationFrame(step); };
 
@@ -102,5 +115,6 @@ export function installMagnify(target: HTMLElement): () => void {
     if (settleTimer) clearTimeout(settleTimer);
     s = ts = 1; x = y = tx = ty = 0;
     apply();
+    announce(1);
   };
 }
