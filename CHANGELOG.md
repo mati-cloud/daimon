@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/mati-cloud/daimon/compare/v0.6.0...v0.6.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **daemon:** detach into a new session so a terminal can't kill it ([ded2a4b](https://github.com/mati-cloud/daimon/commit/ded2a4b2bc28e00caaf8f56bf06446bb7888bd88))
+* **daemon:** detach into a new session so a terminal can't kill it ([b662f5c](https://github.com/mati-cloud/daimon/commit/b662f5c9fdff45ea66f083de9e0f8be71df9fcb1))
+
 ## [0.6.0](https://github.com/mati-cloud/daimon/compare/v0.5.1...v0.6.0) (2026-11-18)
 
 
