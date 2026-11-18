@@ -433,7 +433,16 @@ const LINE_TOKEN_RE = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|
 /** The attributes in effect at the end of the previous line; renderTermLine moves it on. */
 type SgrCarry = { sgr: Sgr };
 
+/**
+ * OSC sequences nothing here renders: titles (0/2), cwd (7), shell-integration marks other
+ * shells' hooks print — e.g. Ubuntu's /etc/profile.d VTE (666) and systemd (3008) prompt hooks
+ * in bash. Links (8) and inline images (1337) are kept for the renderers that handle them.
+ * One still unterminated at the end (mid-stream) goes too: a terminal wouldn't show it either.
+ */
+const FOREIGN_OSC_RE = /\x1b\](?!8;|1337;)[^\x07\x1b]*(?:\x07|\x1b\\|$)/g;
+
 function renderTermLine(line: string, carry: SgrCarry): string {
+  if (line.includes("\x1b]")) line = line.replace(FOREIGN_OSC_RE, "");
   if (!LINE_CTRL_RE.test(line)) {
     if (line.includes("\x1b[")) eachSgr(line, (_s, _e, params) => { carry.sgr = sgrApply(carry.sgr, params); });
     return line;
