@@ -2904,6 +2904,12 @@ function BlockViewImpl({ block, modeActive = false, onRerun, isLast, currentCtx 
         t.onResize(({ cols, rows }) => resizePty(sessionId, cols, rows)),
         t.onError((err) => console.error("[tui]", err)),
       );
+      const onTuiPaste = (ev: Event) => {
+        const { sid, text } = (ev as CustomEvent<{ sid: string; text: string }>).detail;
+        if (sid === sessionId) t.paste(text).catch(() => {});
+      };
+      window.addEventListener("tui-paste", onTuiPaste);
+      subs.push({ dispose: () => window.removeEventListener("tui-paste", onTuiPaste) });
       // The PTY follows the terminal's *applied* size (onResize). Sending t.cols/t.rows right
       // after fit() would send the pre-fit size (80x24 on a fresh mount): a needless SIGWINCH
       // that makes nano/less redraw. Only if the first fit changed nothing, send it once.
