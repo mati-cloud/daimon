@@ -67,10 +67,13 @@ type ExitListener          = (tabId: string, code: number) => void;
 type ContextListener       = (tabId: string, ctx: ShellContext) => void;
 type CommandStartListener  = (tabId: string) => void;
 
-const outputListeners       = new Set<OutputListener>();
-const exitListeners         = new Set<ExitListener>();
-const contextListeners      = new Set<ContextListener>();
-const commandStartListeners = new Set<CommandStartListener>();
+const outputListeners            = new Set<OutputListener>();
+const exitListeners              = new Set<ExitListener>();
+const contextListeners           = new Set<ContextListener>();
+const commandStartListeners      = new Set<CommandStartListener>();
+const commandCompleteListeners   = new Set<ContextListener>();
+// Tracks tabs where a commandStart fired but the follow-up prompt hasn't yet.
+const pendingCommandComplete     = new Set<string>();
 
 // Cache last context per tab so late onContext subscribers get it immediately
 const lastContext = new Map<string, ShellContext>();
@@ -157,7 +160,11 @@ async function connect() {
       perf.promptAt = performance.now();
       lastContext.set(ev.tab_id, ctx);
       contextListeners.forEach((fn) => fn(ev.tab_id, ctx));
+      if (pendingCommandComplete.delete(ev.tab_id)) {
+        commandCompleteListeners.forEach((fn) => fn(ev.tab_id, ctx));
+      }
     } else if (ev.type === "commandStart") {
+      pendingCommandComplete.add(ev.tab_id);
       commandStartListeners.forEach((fn) => fn(ev.tab_id));
     } else if (ev.type === "altScreenEnter") {
       altScreenListeners.forEach((fn) => fn(ev.tab_id, true));
@@ -216,8 +223,9 @@ export function openInBrowser(url: string) {
 export const shell = {
   onOutput:       (fn: OutputListener)       => { outputListeners.add(fn);        return () => outputListeners.delete(fn); },
   onExit:         (fn: ExitListener)         => { exitListeners.add(fn);          return () => exitListeners.delete(fn); },
-  onContext:      (fn: ContextListener)      => { contextListeners.add(fn);       return () => contextListeners.delete(fn); },
-  onCommandStart: (fn: CommandStartListener) => { commandStartListeners.add(fn);  return () => commandStartListeners.delete(fn); },
+  onContext:      (fn: ContextListener)      => { contextListeners.add(fn);            return () => contextListeners.delete(fn); },
+  onCommandStart: (fn: CommandStartListener) => { commandStartListeners.add(fn);       return () => commandStartListeners.delete(fn); },
+  onCommandComplete: (fn: ContextListener)   => { commandCompleteListeners.add(fn);    return () => commandCompleteListeners.delete(fn); },
   onAltScreen:    (fn: AltScreenListener)    => { altScreenListeners.add(fn);     return () => altScreenListeners.delete(fn); },
   /** A file in ~/.config/daimon/plugins/ changed (the daemon watches the folder). */
   onPluginsChanged: (fn: () => void)         => { pluginsChangedListeners.add(fn); return () => pluginsChangedListeners.delete(fn); },

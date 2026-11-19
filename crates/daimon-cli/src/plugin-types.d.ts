@@ -53,6 +53,9 @@ declare module "daimon" {
   export function useShellContext(): ShellContext;
   /** Calls `fn` now and after every prompt of the focused shell. Returns an unsubscribe. */
   export function onShellContext(fn: (ctx: ShellContext) => void): () => void;
+  /** Calls `fn` after a command completes (prompt follows a commandStart) in the focused
+   *  shell. Unlike onShellContext, does not fire on registration or tab-switch. Returns an unsubscribe. */
+  export function onCommandComplete(fn: (ctx: ShellContext) => void): () => void;
   /** Have the shell report these env vars in `ShellContext.env` (from the next prompt on).
    *  Only the names asked for leave the shell. */
   export function watchEnv(names: string | string[]): void;

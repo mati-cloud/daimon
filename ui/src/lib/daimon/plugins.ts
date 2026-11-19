@@ -130,7 +130,8 @@ function onShortcutKey(e: KeyboardEvent) {
 
 let activeTab = "";
 let currentContext: ShellContext = {};
-const contextListeners = new Set<(ctx: ShellContext) => void>();
+const contextListeners         = new Set<(ctx: ShellContext) => void>();
+const commandCompleteListeners = new Set<(ctx: ShellContext) => void>();
 
 function refreshContext() {
   const next = shell.context(activeTab) ?? {};
@@ -140,6 +141,10 @@ function refreshContext() {
 }
 
 shell.onContext((tabId) => { if (tabId === activeTab) refreshContext(); });
+shell.onCommandComplete((tabId, ctx) => {
+  if (tabId !== activeTab) return;
+  commandCompleteListeners.forEach((fn) => { try { fn(ctx); } catch (e) { console.error("[plugins]", e); } });
+});
 
 /** daimon tells plugins which tab's shell is in focus. */
 export function setPluginActiveTab(tabId: string) {
@@ -153,6 +158,14 @@ export function onShellContext(fn: (ctx: ShellContext) => void): () => void {
   contextListeners.add(fn);
   fn(currentContext);
   return () => { contextListeners.delete(fn); };
+}
+
+/** Calls `fn` after a command completes in the focused shell (prompt follows a commandStart).
+ *  Unlike onShellContext, does not fire immediately on registration or on tab-switch.
+ *  Returns an unsubscribe function. */
+export function onCommandComplete(fn: (ctx: ShellContext) => void): () => void {
+  commandCompleteListeners.add(fn);
+  return () => { commandCompleteListeners.delete(fn); };
 }
 
 const subscribeContext = (fn: () => void) => {
@@ -216,6 +229,7 @@ export const pluginApi = {
   registerShortcut,
   useShellContext,
   onShellContext,
+  onCommandComplete,
   watchEnv,
   runCommand,
   focusComposer,
