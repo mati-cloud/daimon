@@ -727,92 +727,59 @@ function Daimon() {
       toast.success(`${label} ${preview}`, { duration: 2000 });
     };
 
+    // Exact-chord dispatch: only fire when every modifier bit matches precisely.
+    // No capture phase — avoids WKWebView treating any JS keydown handler as "script handled",
+    // which would suppress the native paste: action and break Cmd+V in TUI terminals.
+    const mod = (e: KeyboardEvent) => e.metaKey || e.ctrlKey;
+    const chord = (e: KeyboardEvent, shift: boolean | null, key: string) =>
+      mod(e) && e.key.toLowerCase() === key && (shift === null || e.shiftKey === shift) && !e.altKey;
+
     const onKeyDown = (e: KeyboardEvent) => {
-      // Escape closes panels if open
-      if (e.key === "Escape" && globalSearchOpen) { setGlobalSearchOpen(false); setGlobalSearchQuery(""); return; }
-      if (e.key === "Escape" && historyOpen) {
-        setHistoryOpen(false);
+      // Escape: no modifier required, only when a panel is open.
+      if (e.key === "Escape") {
+        if (globalSearchOpen) { setGlobalSearchOpen(false); setGlobalSearchQuery(""); return; }
+        if (historyOpen) { setHistoryOpen(false); return; }
         return;
       }
-      if (!e.metaKey && !e.ctrlKey) return;
-      if (e.shiftKey && (e.key === "P" || e.key === "p")) {
+      if (!mod(e)) return;
+
+      if (chord(e, true,  "p")) { e.preventDefault(); togglePresentation(); return; }
+      if (chord(e, false, "p")) { e.preventDefault(); setPaletteOpen(true); return; }
+      if (chord(e, false, "f")) { e.preventDefault(); setGlobalSearchOpen(true); return; }
+      if (chord(e, false, "=") || chord(e, false, "+")) { e.preventDefault(); setFontSize(s => Math.min(s + 1, 20)); return; }
+      if (chord(e, false, "-")) { e.preventDefault(); setFontSize(s => Math.max(s - 1, 10)); return; }
+      if (chord(e, false, "k")) { e.preventDefault(); setKeysModalOpen(true); return; }
+      if (chord(e, false, ",")) { e.preventDefault(); setSettingsOpen(true); return; }
+      if (chord(e, false, "b")) { e.preventDefault(); setSidebarOpen((o) => !o); return; }
+      if (chord(e, false, "h")) { e.preventDefault(); setHistoryOpen((o) => !o); return; }
+      if (chord(e, false, "t")) { e.preventDefault(); newTab(); return; }
+      if (chord(e, true,  "d")) {
         e.preventDefault();
-        togglePresentation();
+        setSessions((prev) => prev.map((s) => s.id === activeId ? removeSplit(s) : s));
+        setFocusedPane("left");
         return;
       }
-      if (!e.shiftKey && e.key === "p") {
+      if (chord(e, false, "d")) {
         e.preventDefault();
-        setPaletteOpen(true);
-        return;
-      }
-      if (e.key === "f") {
-        e.preventDefault();
-        setGlobalSearchOpen(true);
-        return;
-      }
-      if (e.key === "=" || e.key === "+") { e.preventDefault(); setFontSize(s => Math.min(s + 1, 20)); return; }
-      if (e.key === "-") { e.preventDefault(); setFontSize(s => Math.max(s - 1, 10)); return; }
-      if (e.key === "k") {
-        e.preventDefault();
-        setKeysModalOpen(true);
-        return;
-      }
-      if (e.key === ",") {
-        e.preventDefault();
-        setSettingsOpen(true);
-        return;
-      }
-      if (e.key === "b") {
-        e.preventDefault();
-        setSidebarOpen((o) => !o);
-        return;
-      }
-      if (e.key === "h") {
-        e.preventDefault();
-        setHistoryOpen((o) => !o);
-        return;
-      }
-      if (!e.shiftKey && e.key === "t") {
-        e.preventDefault();
-        newTab();
-        return;
-      }
-      if (e.key === "d" || e.key === "D") {
-        e.preventDefault();
-        if (e.shiftKey) {
-          // ⌘⇧D — close split
-          setSessions((prev) => prev.map((s) => s.id === activeId ? removeSplit(s) : s));
-          setFocusedPane("left");
+        if (!splitSessionId) {
+          const s = makeSession();
+          setSessions((prev) => [...prev, s].map((x) => x.id === activeId ? { ...x, splitId: s.id } : x));
+          setFocusedPane("right");
         } else {
-          // ⌘D — open split or toggle pane focus
-          if (!splitSessionId) {
-            const s = makeSession();
-            setSessions((prev) => [...prev, s].map((x) => x.id === activeId ? { ...x, splitId: s.id } : x));
-            setFocusedPane("right");
-          } else {
-            setFocusedPane((p) => p === "left" ? "right" : "left");
-          }
+          setFocusedPane((p) => p === "left" ? "right" : "left");
         }
         return;
       }
-      if (e.key === "w") {
-        e.preventDefault();
-        closeTab(activeId);
-        return;
-      }
-      if (e.key >= "1" && e.key <= "9") {
+      if (chord(e, false, "w")) { e.preventDefault(); closeTab(activeId); return; }
+      if (mod(e) && !e.shiftKey && !e.altKey && e.key >= "1" && e.key <= "9") {
         const idx = parseInt(e.key) - 1;
         const target = topLevelSessions[idx];
         if (target) { e.preventDefault(); setActiveId(target.id); setFocusedPane("left"); }
         return;
       }
-      if (e.key === "c") {
-        // Ctrl-C with pending command → SIGINT to PTY, abandon after 2s if stuck.
-        // Skip when a TUI terminal is active: it handles Ctrl-C itself via onData.
-        // With text marked it copies instead (below) and drops the selection, so the
-        // command keeps running; a second Ctrl-C interrupts.
+      if (e.key === "c" || e.key === "C") {
         const marked = window.getSelection()?.toString() ?? "";
-        if (e.ctrlKey && !e.metaKey && !marked && !tuiInActiveRef.current) {
+        if (e.ctrlKey && !e.metaKey && !e.shiftKey && !marked && !tuiInActiveRef.current) {
           const sess = sessions.find((s) => s.id === activeId);
           if (sess?.blocks.some((b) => b.pending)) {
             e.preventDefault();
@@ -821,10 +788,9 @@ function Daimon() {
             return;
           }
         }
-        const sel = marked;
-        if (!sel) return;
-        navigator.clipboard.writeText(sel).catch(() => {});
-        clip("Copied", sel);
+        if (!marked) return;
+        navigator.clipboard.writeText(marked).catch(() => {});
+        clip("Copied", marked);
         if (e.ctrlKey && !e.metaKey) window.getSelection()?.removeAllRanges();
       }
     };
@@ -833,18 +799,20 @@ function Daimon() {
       const text = e.clipboardData?.getData("text") ?? "";
       if (!text) return;
       if (tuiInActiveRef.current) {
-        // Forward to the active TUI terminal which handles bracketed-paste wrapping itself.
-        window.dispatchEvent(new CustomEvent("tui-paste", { detail: { sid: focusedSidRef.current, text } }));
+        // Wraith's input.addEventListener('paste') already called preventDefault() and handled it
+        // (bracketed-paste aware). Only forward if Wraith didn't get it (e.g. its input lost focus).
+        if (!e.defaultPrevented) {
+          window.dispatchEvent(new CustomEvent("tui-paste", { detail: { sid: focusedSidRef.current, text } }));
+        }
         return;
       }
       clip("Pasted", text);
     };
 
-    // Capture phase: fires before terminal elements can stop propagation.
-    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keydown", onKeyDown);
     window.addEventListener("paste", onPaste);
     return () => {
-      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("paste", onPaste);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
