@@ -23,6 +23,8 @@ export interface TuiTerminal {
   readonly cols: number;
   readonly rows: number;
   write(data: string): Promise<void>;
+  /** Paste text, wrapping in bracketed-paste sequences when the app requests them. */
+  paste(text: string): Promise<void>;
   fit(): void;
   focus(): void;
   onData(listener: (data: string) => void): Disposable;
@@ -76,6 +78,7 @@ async function mountWraith(el: HTMLElement, opts: TuiOptions): Promise<TuiTermin
     get cols() { return t.cols; },
     get rows() { return t.rows; },
     write: (data) => t.write(data),
+    paste: (text) => t.paste(text),
     fit: () => t.fit(),
     focus: () => t.focus(),
     onData: (l) => t.onData(l),
@@ -221,6 +224,7 @@ function mountXterm(el: HTMLElement, opts: TuiOptions): TuiTerminal {
       if (disposed) return reject(new Error("terminal disposed"));
       term.write(data, resolve);
     }),
+    paste: (text) => { term.paste(text); return Promise.resolve(); },
     fit,
     focus: () => term.focus(),
     onData: (l) => term.onData(l),

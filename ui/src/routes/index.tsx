@@ -832,6 +832,11 @@ function Daimon() {
     const onPaste = (e: ClipboardEvent) => {
       const text = e.clipboardData?.getData("text") ?? "";
       if (!text) return;
+      if (tuiInActiveRef.current) {
+        // Forward to the active TUI terminal which handles bracketed-paste wrapping itself.
+        window.dispatchEvent(new CustomEvent("tui-paste", { detail: { sid: focusedSidRef.current, text } }));
+        return;
+      }
       clip("Pasted", text);
     };
 
