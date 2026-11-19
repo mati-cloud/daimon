@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/mati-cloud/daimon/compare/v0.9.0...v0.10.0) (2026-11-19)
+
+
+### Features
+
+* **plugins:** add onCommandComplete event ([4cf71dd](https://github.com/mati-cloud/daimon/commit/4cf71dd2ea4517fd3d69760b63416f3190af8ea8))
+
+
+### Bug Fixes
+
+* **tui:** exact-chord keydown dispatch, drop capture phase to restore Cmd+V paste ([a0893d6](https://github.com/mati-cloud/daimon/commit/a0893d66dbcd1685a76aeef1e5ca01dd6a8f126c))
+
 ## [0.9.0](https://github.com/mati-cloud/daimon/compare/v0.8.0...v0.9.0) (2026-11-19)
 
 
