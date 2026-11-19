@@ -808,10 +808,11 @@ function Daimon() {
       }
       if (e.key === "c") {
         // Ctrl-C with pending command → SIGINT to PTY, abandon after 2s if stuck.
+        // Skip when a TUI terminal is active: it handles Ctrl-C itself via onData.
         // With text marked it copies instead (below) and drops the selection, so the
         // command keeps running; a second Ctrl-C interrupts.
         const marked = window.getSelection()?.toString() ?? "";
-        if (e.ctrlKey && !e.metaKey && !marked) {
+        if (e.ctrlKey && !e.metaKey && !marked && !tuiInActiveRef.current) {
           const sess = sessions.find((s) => s.id === activeId);
           if (sess?.blocks.some((b) => b.pending)) {
             e.preventDefault();
@@ -834,23 +835,83 @@ function Daimon() {
       clip("Pasted", text);
     };
 
-    window.addEventListener("keydown", onKeyDown);
+    // Capture phase: fires before terminal elements can stop propagation.
+    window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("paste", onPaste);
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("paste", onPaste);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, sessions, historyOpen]);
 
   // Block hover shortcuts: ⌘⇧ (or ⌃⇧) + C/I/O/R/E
+  // Keyboard block navigation: on mod+shift activation, auto-select a block by position;
+  // arrow keys navigate; Enter scrolls to the selected block to confirm it.
   const blockModRef = useRef(false);
+  // Tracks whether the current hoveredBlockId was set by keyboard (vs mouse).
+  const kbdDrivenRef = useRef(false);
   useEffect(() => {
+    const getBlocks = () => {
+      // Use active session's blocks in DOM order via blockRefsMap keys.
+      const session = sessions.find(s => s.id === activeId);
+      return session?.blocks ?? [];
+    };
+
+    const pickInitialBlock = (): string | null => {
+      const blocks = getBlocks();
+      if (!blocks.length) return null;
+      const container = scrollContainersRef.current.get(activeId);
+      if (!container) return blocks[blocks.length - 1]!.id;
+      // At bottom → last block; else → block nearest viewport center.
+      if (atBottom(container)) return blocks[blocks.length - 1]!.id;
+      const mid = container.scrollTop + container.clientHeight / 2;
+      let best: string | null = null;
+      let bestDist = Infinity;
+      for (const b of blocks) {
+        const el = blockRefsMap.current.get(b.id);
+        if (!el) continue;
+        const dist = Math.abs(el.offsetTop + el.offsetHeight / 2 - mid);
+        if (dist < bestDist) { bestDist = dist; best = b.id; }
+      }
+      return best ?? blocks[Math.floor(blocks.length / 2)]!.id;
+    };
+
     const onDown = (e: KeyboardEvent) => {
       const mod = (e.metaKey || e.ctrlKey) && e.shiftKey;
       const tuiActive = altScreenActive || tuiBlockIds.has(activeId);
-      if (mod && !blockModRef.current) { blockModRef.current = true; if (!pagerActive && !tuiActive) setBlockModActive(true); }
-      if (!mod || !hoveredBlockId || pagerActive || tuiActive) return;
+      if (mod && !blockModRef.current) {
+        blockModRef.current = true;
+        if (!pagerActive && !tuiActive) {
+          setBlockModActive(true);
+          // Auto-select a block only when mouse isn't already on one.
+          if (!hoveredBlockId) {
+            const id = pickInitialBlock();
+            if (id) { kbdDrivenRef.current = true; setHoveredBlockId(id); }
+          }
+        }
+      }
+      if (!mod || pagerActive || tuiActive) return;
+      // Arrow navigation while mod+shift held.
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const blocks = getBlocks();
+        const cur = hoveredBlockId ?? null;
+        const idx = cur ? blocks.findIndex(b => b.id === cur) : -1;
+        const next = e.key === "ArrowUp"
+          ? Math.max(0, idx - 1)
+          : Math.min(blocks.length - 1, idx + 1);
+        const id = blocks[next]?.id;
+        if (id) { kbdDrivenRef.current = true; setHoveredBlockId(id); }
+        return;
+      }
+      // Enter: scroll to block, confirming selection (menu is already visible).
+      if (e.key === "Enter" && hoveredBlockId) {
+        e.preventDefault();
+        blockRefsMap.current.get(hoveredBlockId)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        return;
+      }
+      if (!hoveredBlockId) return;
       const block = active.blocks.find(b => b.id === hoveredBlockId);
       if (!block) return;
       const key = e.key.toUpperCase();
@@ -874,17 +935,24 @@ function Daimon() {
       }
     };
     const onUp = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) { blockModRef.current = false; setBlockModActive(false); }
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) {
+        blockModRef.current = false;
+        setBlockModActive(false);
+        // Clear keyboard-driven selection when mod released.
+        if (kbdDrivenRef.current) { kbdDrivenRef.current = false; setHoveredBlockId(null); }
+      }
     };
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
     return () => { window.removeEventListener("keydown", onDown); window.removeEventListener("keyup", onUp); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hoveredBlockId, active.blocks, altScreenActive, tuiBlockIds]);
+  }, [hoveredBlockId, active.blocks, altScreenActive, tuiBlockIds, activeId, sessions]);
 
   // Leaving a full-screen program (nano, less, htop…): back to the command input, and — if the
   // pane was following — straight to the bottom (the block just swapped terminal for output).
   const prevTuiRef = useRef(tuiInActive);
+  const tuiInActiveRef = useRef(tuiInActive);
+  tuiInActiveRef.current = tuiInActive;
   useEffect(() => {
     if (prevTuiRef.current && !tuiInActive) {
       refocusComposer("left fullscreen");
@@ -1104,7 +1172,7 @@ function Daimon() {
                     ref={(el) => { if (el) blockRefsMap.current.set(b.id, el); else blockRefsMap.current.delete(b.id); }}
                     data-ring={effectiveHoveredBlockId === b.id && effectiveBlockModActive ? "on" : undefined}
                     className="block-ring relative py-7 rounded-lg"
-                    onMouseEnter={() => { if (!pagerActive) setHoveredBlockId(b.id); if (!isFocused) setFocusedPane(splitSessionId && paneSessionId === splitSessionId ? "right" : "left"); }}
+                    onMouseEnter={() => { if (!pagerActive) { kbdDrivenRef.current = false; setHoveredBlockId(b.id); } if (!isFocused) setFocusedPane(splitSessionId && paneSessionId === splitSessionId ? "right" : "left"); }}
                     onMouseLeave={() => setHoveredBlockId(null)}
                   >
                     <BlockView block={b} modeActive={effectiveHoveredBlockId === b.id && effectiveBlockModActive} onRerun={(cmd) => submitRef.current(cmd, paneSessionId)} isLast={i === pane.blocks.length - 1} currentCtx={pane.state.ctx.name} sessionId={pane.id} isTuiActive={tuiBlockIds.get(pane.id) === b.id} promptingForInput={panePrompting && !!b.pending} onSearch={(q) => { setGlobalSearchQuery(q); setGlobalSearchOpen(true); }} onPathClick={(path) => { const expanded = path.startsWith("~") ? __HOME__ + path.slice(1) : path; const hasExt = /\.[^/]+$/.test(expanded.split("/").pop() ?? ""); const dir = hasExt ? expanded.split("/").slice(0, -1).join("/") || "/" : expanded; submitRef.current("cd " + JSON.stringify(dir), paneSessionId); toast("cd " + dir, { duration: 2000 }); }} />
