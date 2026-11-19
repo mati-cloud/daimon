@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/mati-cloud/daimon/compare/v0.7.0...v0.8.0) (2026-11-19)
+
+
+### Features
+
+* **ui:** keyboard block navigation in mod+shift mode ([3bba6eb](https://github.com/mati-cloud/daimon/commit/3bba6eb2bc69681dc1ec070d4fe1fdeac953bfce))
+
 ## [0.7.0](https://github.com/mati-cloud/daimon/compare/v0.6.1...v0.7.0) (2026-11-18)
 
 
