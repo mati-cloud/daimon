@@ -8,6 +8,8 @@ import "./styles.css";
 import { applyGlass, loadGlass } from "./lib/daimon/appearance";
 import { installMagnify } from "./lib/daimon/magnify";
 import { loadPlugins } from "./lib/daimon/plugins";
+import { openInBrowser } from "./lib/daimon/rpc";
+import { toast } from "sonner";
 
 // The native shell appends ?transparent=1 only when the window really is see-through
 // (and &blur=native when the compositor also blurs the desktop behind it).
@@ -57,6 +59,27 @@ applyGlass(loadGlass());
 // Pinch / Ctrl + wheel magnifies the window (also over full-screen programs), and a
 // ⌘/Ctrl-drag pans it.
 installMagnify(document.getElementById("root")!);
+
+// A link whose text is a URL for one host but which opens another (OSC 8 lets output pick
+// both) doesn't open on a click: a toast names the real host and offers to open it.
+document.addEventListener("click", (e) => {
+  const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+  if (!a) return;
+  const text = a.textContent?.trim().match(/^(?:https?:\/\/|(?=www\.))([^\s/:?#]+)/i)?.[1];
+  if (!text) return;
+  let real: URL, shown: string;
+  // Both through URL, so a look-alike (Cyrillic "а") compares as its punycode, not as "a".
+  try { real = new URL(a.href); shown = new URL(`http://${text}`).hostname; } catch { return; }
+  const norm = (h: string) => h.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+  if (norm(real.hostname) === norm(shown)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  toast.warning(`This link says ${norm(shown)} but opens ${real.hostname}`, {
+    id: "link-mismatch",
+    duration: 8000,
+    action: { label: "Open anyway", onClick: () => openInBrowser(real.href) },
+  });
+}, true);
 
 const router = getRouter();
 

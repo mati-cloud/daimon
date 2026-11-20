@@ -112,13 +112,19 @@ impl Store {
             SELECT rowid, id, input, cwd, ts, exit_code FROM blocks
             WHERE rowid NOT IN (SELECT rowid FROM blocks_fts);
         ")?;
-        // Saved output can hold secrets (`cat .env`, `kubectl get secret`): keep it for
-        // BLOCK_RETENTION_DAYS, not forever. Command history is kept, like a shell's.
-        let cutoff = now_ms() - BLOCK_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-        conn.execute("DELETE FROM blocks WHERE ts < ?1", params![cutoff])?;
         let store = Store(Arc::new(Mutex::new(conn)));
+        store.prune_blocks()?;
         store.import_zsh_history()?;
         Ok(store)
+    }
+
+    /// Saved output can hold secrets (`cat .env`, `kubectl get secret`): it's kept for
+    /// BLOCK_RETENTION_DAYS, not forever. Command history is kept, like a shell's.
+    /// Runs at startup and hourly (the daemon can run for weeks).
+    pub fn prune_blocks(&self) -> Result<()> {
+        let cutoff = now_ms() - BLOCK_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+        self.0.lock().unwrap().execute("DELETE FROM blocks WHERE ts < ?1", params![cutoff])?;
+        Ok(())
     }
 
     // ── History ──────────────────────────────────────────────────────────────

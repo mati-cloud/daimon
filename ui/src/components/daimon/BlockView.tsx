@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Keys } from "./Kbd";
 import { MarkdownDiffView, MarkdownModeToggle } from "./MarkdownDiffView";
 import { isMarkdownPath, useMarkdownRendered, toggleMarkdownRendered } from "@/lib/daimon/markdownMode";
-import { fetchLinkPreview, previewUrls, useLinkPreviewsEnabled, type LinkPreview } from "@/lib/daimon/linkPreview";
+import { fetchLinkPreview, previewUrls, useLinkPreviewsEnabled, useRemoteImage, type LinkPreview } from "@/lib/daimon/linkPreview";
 import { displayPath } from "@/lib/daimon/world";
 import { shell } from "@/lib/daimon/rpc";
 import { sendRaw, resizePty, getTuiReplayBuffer, getAltScreen, onAltScreenChange, takeRedraw, STREAMING_INTERACTIVE_RE, abandonRun, looksLikeYaml, splitHtmlLines } from "@/lib/daimon/shell";
@@ -2552,12 +2552,7 @@ function SearchableOutput({ html, htmlLines, lines, tone, pm, onSearch, onPathCl
                 return (
                   <div key={i}>
                     {linkifyAll(line, onPathClick)}
-                    <img
-                      src={trimmed}
-                      alt=""
-                      className="mt-1 max-h-20 cursor-zoom-in rounded block"
-                      onClick={() => setLightboxSrc(trimmed)}
-                    />
+                    <RemoteImage url={trimmed} className="mt-1 max-h-20 cursor-zoom-in rounded block" onOpen={setLightboxSrc} />
                   </div>
                 );
               }
@@ -2760,9 +2755,14 @@ function LinkPreviews({ out }: { out: Out[] }) {
   );
 }
 
+/** An image from the network, fetched by the daemon (see useRemoteImage); nothing until it's in. */
+function RemoteImage({ url, className, onOpen }: { url: string; className: string; onOpen?: (src: string) => void }) {
+  const src = useRemoteImage(url);
+  if (!src) return null;
+  return <img src={src} alt="" className={className} {...(onOpen ? { onClick: () => onOpen(src) } : {})} />;
+}
+
 function LinkCard({ p }: { p: LinkPreview }) {
-  const [imgOk, setImgOk] = useState(true);
-  const [iconOk, setIconOk] = useState(true);
   const host = (() => { try { return new URL(p.url).hostname.replace(/^www\./, ""); } catch { return p.url; } })();
   return (
     <a
@@ -2774,22 +2774,13 @@ function LinkCard({ p }: { p: LinkPreview }) {
       <span className="w-[3px] shrink-0 bg-signal/60" aria-hidden />
       <span className="flex min-w-0 flex-1 flex-col gap-1 px-3 py-2.5">
         <span className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-          {p.icon && iconOk && <img src={p.icon} alt="" className="size-3.5 rounded-sm" onError={() => setIconOk(false)} />}
+          {p.icon && <RemoteImage url={p.icon} className="size-3.5 rounded-sm" />}
           <span className="truncate">{p.siteName || host}</span>
         </span>
         {p.title && <span className="line-clamp-2 font-sans text-[13px] font-semibold leading-snug text-foreground group-hover/card:text-signal">{p.title}</span>}
         {p.description && <span className="line-clamp-2 font-sans text-[12px] leading-snug text-muted-foreground">{p.description}</span>}
       </span>
-      {p.image && imgOk && (
-        <img
-          src={p.image}
-          alt=""
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          onError={() => setImgOk(false)}
-          className="hidden w-[168px] shrink-0 border-l border-line/40 object-cover sm:block"
-        />
-      )}
+      {p.image && <RemoteImage url={p.image} className="hidden w-[168px] shrink-0 border-l border-line/40 object-cover sm:block" />}
     </a>
   );
 }

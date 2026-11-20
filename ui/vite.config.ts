@@ -11,14 +11,14 @@ import type { Plugin } from "vite";
 //   script-src blob:            plugins and their module shims are imported from blob: URLs
 //   'wasm-unsafe-eval'          the terminal renderer's WebAssembly
 //   style-src 'unsafe-inline'   coloured output is <span style>, plugin CSS is a <style>
-//   img-src https:              link-preview images and favicons
+//   img-src (no https:)         remote images come from the daemon as data: URLs; the page never connects out
 //   connect-src ws://localhost  the pty-daemon (port chosen at runtime)
 export const CSP = [
   "default-src 'none'",
   "script-src 'self' blob: 'wasm-unsafe-eval'",
   "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https:",
+  "img-src 'self' data: blob:",
   "font-src 'self' data:",
   "media-src 'self' data: blob:",
   "connect-src 'self' ws://localhost:* ws://127.0.0.1:*",

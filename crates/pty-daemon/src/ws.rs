@@ -136,6 +136,18 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
     });
 
     tokio::spawn(crate::plugins::watch(event_tx.clone()));
+    let db_prune = db.clone();
+    tokio::spawn(async move {
+        let mut hourly = tokio::time::interval(Duration::from_secs(60 * 60));
+        hourly.tick().await; // the first tick is immediate; Store::open already pruned
+        loop {
+            hourly.tick().await;
+            let db = db_prune.clone();
+            if let Ok(Err(e)) = tokio::task::spawn_blocking(move || db.prune_blocks()).await {
+                warn!("pruning old blocks: {e}");
+            }
+        }
+    });
 
     info!("WebSocket server ready");
 
@@ -309,6 +321,13 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
                             let tx = client_tx.clone();
                             tokio::task::spawn_blocking(move || {
                                 let data = crate::commands::git_file_content(&blob, &file_path, &cwd);
+                                let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
+                            });
+                        }
+                        Ok(SessionCommand::Image { req_id, url }) => {
+                            let tx = client_tx.clone();
+                            tokio::task::spawn_blocking(move || {
+                                let data = crate::link_preview::image(&url);
                                 let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
                             });
                         }

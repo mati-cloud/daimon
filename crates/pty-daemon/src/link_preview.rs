@@ -26,15 +26,8 @@ pub fn link_preview(url: &str) -> Value {
     if let Some(v) = cache().lock().unwrap().get(url) {
         return v.clone();
     }
-    let mut v = fetch(url).map(|html| parse(url, &html)).unwrap_or(Value::Null);
-    // The webview loads the image and icon itself: drop any that point at a private address.
-    for key in ["image", "icon"] {
-        if let Some(slot) = v.get_mut(key) {
-            if !slot.as_str().is_some_and(|u| u.starts_with("https://") && allowed(u).is_some()) {
-                *slot = Value::Null;
-            }
-        }
-    }
+    // Image and icon stay URLs: the UI shows them through `image` (fetched the same way).
+    let v = fetch_head(url).map(|html| parse(url, &html)).unwrap_or(Value::Null);
     let mut c = cache().lock().unwrap();
     if c.len() >= CACHE_CAP {
         c.clear();
@@ -98,9 +91,10 @@ fn allowed(url: &str) -> Option<(String, u16, IpAddr)> {
 
 const MAX_REDIRECTS: usize = 5;
 
-/// Fetches the page's <head>, following redirects one hop at a time so each new host goes
-/// through the same `allowed` check (curl's own `-L` would follow them unchecked).
-fn fetch(url: &str) -> Option<String> {
+/// Fetches `url` (at most `max` bytes of body), following redirects one hop at a time so
+/// each new host goes through the same `allowed` check (curl's own `-L` would follow them
+/// unchecked). Returns the body (`max + 1` bytes means it was cut off) and its content type.
+fn fetch(url: &str, max: usize, accept: &str) -> Option<(Vec<u8>, String)> {
     let mut url = url.to_string();
     for _ in 0..=MAX_REDIRECTS {
         let (host, port, ip) = allowed(&url)?;
@@ -115,9 +109,9 @@ fn fetch(url: &str) -> Option<String> {
                 "--proto", "=http,https",
                 "--resolve", &format!("{host}:{port}:{ip}"),
                 "-A", "Mozilla/5.0 (compatible; daimon-link-preview)",
-                "-H", "Accept: text/html,application/xhtml+xml",
-                // The redirect target (empty if none) goes to stderr, apart from the body.
-                "-w", "%{stderr}%{redirect_url}",
+                "-H", &format!("Accept: {accept}"),
+                // Redirect target (empty if none) and content type go to stderr, apart from the body.
+                "-w", "%{stderr}%{redirect_url}\n%{content_type}",
                 "--",
                 &url,
             ])
@@ -126,23 +120,46 @@ fn fetch(url: &str) -> Option<String> {
             .stderr(Stdio::piped())
             .spawn()
             .ok()?;
-        let mut buf = Vec::with_capacity(64 * 1024);
-        let _ = child.stdout.take()?.take(MAX_BYTES as u64).read_to_end(&mut buf);
+        let mut body = Vec::with_capacity(64 * 1024);
+        let _ = child.stdout.take()?.take(max as u64 + 1).read_to_end(&mut body);
         let _ = child.kill();
-        let mut redirect = String::new();
-        let _ = child.stderr.take()?.take(8192).read_to_string(&mut redirect);
+        let mut meta = String::new();
+        let _ = child.stderr.take()?.take(8192).read_to_string(&mut meta);
         let _ = child.wait();
+        let (redirect, content_type) = meta.split_once('\n').unwrap_or((meta.as_str(), ""));
         let redirect = redirect.trim();
         if !redirect.is_empty() {
             url = redirect.to_string();
             continue;
         }
-        // The tags we want live in <head>; stop there so a huge body isn't scanned.
-        let text = String::from_utf8_lossy(&buf);
-        let end = text.find("</head>").or_else(|| text.find("</HEAD>")).unwrap_or(text.len());
-        return Some(text[..end].to_string());
+        return Some((body, content_type.trim().to_ascii_lowercase()));
     }
     None
+}
+
+/// The page's <head> (the tags we want live there; a huge body isn't scanned).
+fn fetch_head(url: &str) -> Option<String> {
+    let (body, _) = fetch(url, MAX_BYTES, "text/html,application/xhtml+xml")?;
+    let text = String::from_utf8_lossy(&body);
+    let end = text.find("</head>").or_else(|| text.find("</HEAD>")).unwrap_or(text.len());
+    Some(text[..end].to_string())
+}
+
+const MAX_IMAGE_BYTES: usize = 2 << 20;
+
+/// An image as a `data:` URL, or `null`. The webview shows remote images only through this,
+/// so it never connects anywhere itself: every fetch goes through `allowed`, pinned.
+pub fn image(url: &str) -> Value {
+    use base64::Engine;
+    let Some((body, ct)) = fetch(url, MAX_IMAGE_BYTES, "image/*") else { return Value::Null };
+    let mime = ct.split(';').next().unwrap_or("").trim();
+    let ok = mime.strip_prefix("image/").is_some_and(|sub| {
+        !sub.is_empty() && sub.bytes().all(|b| b.is_ascii_alphanumeric() || b"+-.".contains(&b))
+    });
+    if !ok || body.is_empty() || body.len() > MAX_IMAGE_BYTES {
+        return Value::Null;
+    }
+    Value::String(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(body)))
 }
 
 fn re(pat: &str) -> Regex {

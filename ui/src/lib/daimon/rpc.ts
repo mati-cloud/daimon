@@ -281,6 +281,8 @@ export const shell = {
   getFileDiff:         (hash: string, filePath: string, cwd: string) => request<string>({ type: "fileDiff", hash, file_path: filePath, cwd }),
   getFileContent:      (blob: string, filePath: string, cwd: string) =>
     request<{ content?: string; source?: "blob" | "worktree"; error?: string }>({ type: "fileContent", blob, file_path: filePath, cwd }),
+  /** A remote image as a data: URL, fetched by the daemon (the webview never connects out). */
+  image:               (url: string) => request<string | null>({ type: "image", url }, 10000),
   linkPreview:         (url: string) =>
     request<{ url: string; title?: string | null; description?: string | null; image?: string | null; siteName?: string | null; icon?: string | null } | null>({ type: "linkPreview", url }, 10000),
 

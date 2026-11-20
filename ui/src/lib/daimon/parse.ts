@@ -270,7 +270,7 @@ function ansiHtmlChunk(raw: string, st: AnsiHtmlState): string {
       if (linkOpen) { out += "</a>"; linkOpen = false; }
       const url = m[2];
       if (/^(?:https?|mailto):/i.test(url)) {
-        out += `<a href="${esc(url).replace(/"/g, "&quot;")}" target="_blank" rel="noopener noreferrer" class="text-signal underline underline-offset-2 hover:text-signal/80">`;
+        out += `<a href="${esc(url).replace(/"/g, "&quot;")}" title="${esc(url).replace(/"/g, "&quot;")}" target="_blank" rel="noopener noreferrer" class="text-signal underline underline-offset-2 hover:text-signal/80">`;
         linkOpen = true;
       }
       if (open) out += `<span style="${curStyle}">`;
