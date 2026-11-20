@@ -62,7 +62,7 @@ type DaemonEvent =
   | { type: "output"; tab_id: string; data: string }
   | { type: "exit"; tab_id: string; code: number }
   | { type: "prompt"; tab_id: string; context: string }
-  | { type: "commandStart"; tab_id: string }
+  | { type: "commandStart"; tab_id: string; command?: string }
   | { type: "altScreenEnter"; tab_id: string }
   | { type: "altScreenExit"; tab_id: string }
   | { type: "response"; req_id: string; ok: boolean; data: unknown }
@@ -71,7 +71,7 @@ type DaemonEvent =
 type OutputListener        = (tabId: string, data: string) => void;
 type ExitListener          = (tabId: string, code: number) => void;
 type ContextListener       = (tabId: string, ctx: ShellContext) => void;
-type CommandStartListener  = (tabId: string) => void;
+type CommandStartListener  = (tabId: string, command: string | undefined) => void;
 
 const outputListeners            = new Set<OutputListener>();
 const exitListeners              = new Set<ExitListener>();
@@ -161,7 +161,7 @@ async function connect() {
       }
     } else if (ev.type === "commandStart") {
       pendingCommandComplete.add(ev.tab_id);
-      commandStartListeners.forEach((fn) => fn(ev.tab_id));
+      commandStartListeners.forEach((fn) => fn(ev.tab_id, ev.command));
     } else if (ev.type === "altScreenEnter") {
       altScreenListeners.forEach((fn) => fn(ev.tab_id, true));
     } else if (ev.type === "altScreenExit") {

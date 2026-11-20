@@ -135,6 +135,7 @@ let activeTab = "";
 let currentContext: ShellContext = {};
 const contextListeners         = new Set<(ctx: ShellContext) => void>();
 const commandCompleteListeners = new Set<(ctx: ShellContext) => void>();
+const commandStartListeners    = new Set<(command: string) => void>();
 
 function refreshContext() {
   const next = shell.context(activeTab) ?? {};
@@ -144,6 +145,10 @@ function refreshContext() {
 }
 
 shell.onContext((tabId) => { if (tabId === activeTab) refreshContext(); });
+shell.onCommandStart((tabId, command) => {
+  if (tabId !== activeTab || !command) return;
+  commandStartListeners.forEach((fn) => { try { fn(command); } catch (e) { console.error("[plugins]", e); } });
+});
 shell.onCommandComplete((tabId, ctx) => {
   if (tabId !== activeTab) return;
   commandCompleteListeners.forEach((fn) => { try { fn(ctx); } catch (e) { console.error("[plugins]", e); } });
@@ -169,6 +174,13 @@ export function onShellContext(fn: (ctx: ShellContext) => void): () => void {
 export function onCommandComplete(fn: (ctx: ShellContext) => void): () => void {
   commandCompleteListeners.add(fn);
   return () => { commandCompleteListeners.delete(fn); };
+}
+
+/** Calls `fn` just before a command runs in the focused shell (preexec, with the command text).
+ *  Returns an unsubscribe function. */
+export function onCommandStart(fn: (command: string) => void): () => void {
+  commandStartListeners.add(fn);
+  return () => { commandStartListeners.delete(fn); };
 }
 
 const subscribeContext = (fn: () => void) => {
@@ -232,6 +244,7 @@ export const pluginApi = {
   registerShortcut,
   useShellContext,
   onShellContext,
+  onCommandStart,
   onCommandComplete,
   watchEnv,
   runCommand,

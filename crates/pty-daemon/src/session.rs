@@ -21,7 +21,7 @@ pub enum SessionEvent {
     /// Shell prompt detected — daimon's OSC 133;A marker (prompt ready).
     Prompt { tab_id: String, context: String },
     /// Command started — daimon's OSC 133;C marker (preexec).
-    CommandStart { tab_id: String },
+    CommandStart { tab_id: String, command: Option<String> },
     /// Alt-screen entered (vim/nano).
     AltScreenEnter { tab_id: String },
     /// Alt-screen exited.
@@ -441,7 +441,8 @@ impl Session {
                             let _ = tx.blocking_send(SessionEvent::AltScreenExit { tab_id: tid.clone() });
                         }
                         if cmd_start {
-                            let _ = tx.blocking_send(SessionEvent::CommandStart { tab_id: tid.clone() });
+                            let command = st.lock().unwrap().command.clone();
+                            let _ = tx.blocking_send(SessionEvent::CommandStart { tab_id: tid.clone(), command });
                         }
                         if prompt {
                             let ctx = extract_context_json(&raw).unwrap_or_default();
