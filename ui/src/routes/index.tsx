@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast, Toaster } from "sonner";
 import { PluginGate } from "@/components/daimon/PluginGate";
-import { PlusIcon, XIcon, SunIcon, ZapIcon, PanelLeftIcon, GitBranchIcon, SearchIcon, EyeOffIcon, EyeIcon, SplitSquareHorizontalIcon, ArrowUpRightIcon, LinkIcon } from "lucide-react";
+import { PlusIcon, XIcon, SunIcon, ZapIcon, PanelLeftIcon, GitBranchIcon, SearchIcon, EyeOffIcon, EyeIcon, SplitSquareHorizontalIcon, ArrowUpRightIcon, LinkIcon, BellIcon } from "lucide-react";
 import { BlockMeta, BlockView, PresentationModeContext } from "@/components/daimon/BlockView";
 import { CommandIcon } from "@/components/daimon/CommandIcon";
 import { Composer } from "@/components/daimon/Composer";
@@ -10,6 +10,7 @@ import { HistoryPanel } from "@/components/daimon/HistoryPanel";
 import { run, sendRaw, resizePty, notifyAltScreen, onAltScreenChange, onTuiChange, STREAMING_INTERACTIVE_RE, isStreamingSession, isDaimonified, abandonRun, finishRun, setNotifConfig, type Block, type State } from "@/lib/daimon/shell";
 import { shell, onReconnect, type AttachInfo } from "@/lib/daimon/rpc";
 import { startBench } from "@/lib/daimon/bench";
+import { inTerminal } from "@/lib/daimon/tuiTerminal";
 import { displayPath, HOME, HOME_SEGS } from "@/lib/daimon/world";
 import { LandingPage } from "@/components/daimon/LandingPage";
 import { CommandPalette } from "@/components/daimon/CommandPalette";
@@ -49,6 +50,10 @@ type Session = {
   id: string;
   customName?: string;
   lastCmd?: string;
+  /** Title the running program set (OSC 0/2); gone at the next prompt. Not persisted. */
+  title?: string;
+  /** A bell rang while the session wasn't in view. Not persisted. */
+  bell?: boolean;
   draft?: string;
   state: State;
   blocks: Block[];
@@ -74,7 +79,7 @@ function makeSession(customName?: string): Session {
 }
 
 function sessionLabel(s: Session): string {
-  return s.customName ?? s.lastCmd ?? "New session";
+  return s.customName ?? s.title ?? s.lastCmd ?? "New session";
 }
 
 function removeSplit(s: Session): Session {
@@ -645,6 +650,35 @@ function Daimon() {
   const focusedSidRef = useRef(activeId);
   focusedSidRef.current = focusedPane === "right" && splitSessionId ? splitSessionId : activeId;
 
+  // Title and bell of a full-screen program, as its terminal reports them (BlockView:
+  // "tui-title" / "tui-bell"), shown on the session in the sidebar.
+  const visibleSidsRef = useRef<string[]>([]);
+  visibleSidsRef.current = splitSessionId ? [activeId, splitSessionId] : [activeId];
+  useEffect(() => {
+    const patch = (sid: string, fn: (s: Session) => Session) => setSessions((prev) => prev.map((s) => s.id === sid ? fn(s) : s));
+    const onTitle = (e: Event) => {
+      const { sid, title } = (e as CustomEvent<{ sid: string; title: string }>).detail;
+      patch(sid, ({ title: _, ...s }) => title ? { ...s, title } : s);
+    };
+    const onBell = (e: Event) => {
+      const { sid } = (e as CustomEvent<{ sid: string }>).detail;
+      const inView = !document.hidden && document.hasFocus() && visibleSidsRef.current.includes(sid);
+      if (!inView) patch(sid, (s) => s.bell ? s : { ...s, bell: true });
+    };
+    window.addEventListener("tui-title", onTitle);
+    window.addEventListener("tui-bell", onBell);
+    return () => { window.removeEventListener("tui-title", onTitle); window.removeEventListener("tui-bell", onBell); };
+  }, []);
+  // Seen now: clear the bell of the sessions in view (also on returning to the window).
+  useEffect(() => {
+    const clear = () => setSessions((prev) => prev.some((s) => s.bell && visibleSidsRef.current.includes(s.id))
+      ? prev.map((s) => s.bell && visibleSidsRef.current.includes(s.id) ? (({ bell: _, ...r }) => r)(s) : s)
+      : prev);
+    clear();
+    window.addEventListener("focus", clear);
+    return () => window.removeEventListener("focus", clear);
+  }, [activeId, splitSessionId]);
+
   const anyModalOpen = paletteOpen || keysModalOpen || settingsOpen || globalSearchOpen || searchOpen || historyOpen;
   const prevModalOpenRef = useRef(false);
   const anyModalOpenRef = useRef(anyModalOpen);
@@ -674,6 +708,9 @@ function Daimon() {
         focusLog(`page lacks focus (${why}) → ${requestPageFocus() ? "asked host" : "not asking (no host / asked <500ms ago)"}`);
         return;
       }
+      // A full-screen program in the focused pane takes the keys back (⌘C/⌘V reach it again).
+      const tui = document.querySelector<HTMLElement>('[data-pane-focused="true"] .tui-fullscreen textarea');
+      if (tui) { tui.focus(); focusLog(`focused terminal (${why})`); return; }
       focusComposer(focusedSidRef.current);
       focusLog(`focused composer (${why}) session=${focusedSidRef.current}`);
     });
@@ -751,6 +788,8 @@ function Daimon() {
       mod(e) && e.key.toLowerCase() === key && (shift === null || e.shiftKey === shift) && !e.altKey;
 
     const onKeyDown = (e: KeyboardEvent) => {
+      // Keys typed into a full-screen program are the program's: Ctrl+P/K/D/W, Esc…
+      if (inTerminal(e)) return;
       // Escape: no modifier required, only when a panel is open.
       if (e.key === "Escape") {
         if (globalSearchOpen) { setGlobalSearchOpen(false); setGlobalSearchQuery(""); return; }
@@ -867,6 +906,7 @@ function Daimon() {
     };
 
     const onDown = (e: KeyboardEvent) => {
+      if (inTerminal(e)) return;
       const mod = (e.metaKey || e.ctrlKey) && e.shiftKey;
       const tuiActive = altScreenActive || tuiBlockIds.has(activeId);
       if (mod && !blockModRef.current) {
@@ -1419,6 +1459,7 @@ function Daimon() {
                             <span className="font-mono text-[10px] truncate leading-tight opacity-50">{displayPath(sess.state.cwd)}</span>
                           </div>
                         )}
+                        {sess.bell && <BellIcon aria-label="Bell" className="size-3 shrink-0 text-amber" />}
                         <div className="flex items-center gap-0.5 opacity-0 group-hover/sess:opacity-100 transition-opacity">
                           {isParent && !splitChild && attachCandidates.length > 0 && (
                             <div className="relative group/attach">

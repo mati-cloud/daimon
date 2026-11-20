@@ -11,7 +11,7 @@ import { displayPath } from "@/lib/daimon/world";
 import { shell } from "@/lib/daimon/rpc";
 import { sendRaw, resizePty, getTuiReplayBuffer, getAltScreen, onAltScreenChange, takeRedraw, STREAMING_INTERACTIVE_RE, abandonRun, looksLikeYaml, splitHtmlLines } from "@/lib/daimon/shell";
 import type { Block, Out, LsEntry, GitStatusFile, GitBranchNode, GitLogRef } from "@/lib/daimon/shell";
-import { mountTui, type TuiTerminal } from "@/lib/daimon/tuiTerminal";
+import { inTerminal, mountTui, writeClipboard, type TuiTerminal } from "@/lib/daimon/tuiTerminal";
 import hljs from "highlight.js/lib/core";
 import hljsBash from "highlight.js/lib/languages/bash";
 import hljsJson from "highlight.js/lib/languages/json";
@@ -2817,6 +2817,7 @@ function BlockViewImpl({ block, modeActive = false, onRerun, isLast, currentCtx 
   useEffect(() => {
     if (!isLast) return;
     const onKey = (e: KeyboardEvent) => {
+      if (inTerminal(e)) return;
       if ((e.metaKey || e.ctrlKey) && (e.key === "e" || e.key === "E")) {
         e.preventDefault();
         setExpanded((x) => !x);
@@ -2903,6 +2904,12 @@ function BlockViewImpl({ block, modeActive = false, onRerun, isLast, currentCtx 
         t.onData((data) => sendRaw(sessionId, data)),
         t.onResize(({ cols, rows }) => resizePty(sessionId, cols, rows)),
         t.onError((err) => console.error("[tui]", err)),
+        // Straight from the terminal engine: the sidebar shows them (routes/index.tsx).
+        t.onTitleChange((title) => window.dispatchEvent(new CustomEvent("tui-title", { detail: { sid: sessionId, title } }))),
+        t.onBell(() => window.dispatchEvent(new CustomEvent("tui-bell", { detail: { sid: sessionId } }))),
+        t.onClipboard(writeClipboard),
+        // The title belongs to the program: gone with its terminal.
+        { dispose: () => window.dispatchEvent(new CustomEvent("tui-title", { detail: { sid: sessionId, title: "" } })) },
       );
       const onTuiPaste = (ev: Event) => {
         const { sid, text } = (ev as CustomEvent<{ sid: string; text: string }>).detail;

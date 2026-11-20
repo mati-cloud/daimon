@@ -30,6 +30,11 @@ export interface TuiTerminal {
   onData(listener: (data: string) => void): Disposable;
   onResize(listener: (size: { cols: number; rows: number }) => void): Disposable;
   onError(listener: (err: Error) => void): Disposable;
+  /** The program set the window title (OSC 0/2). */
+  onTitleChange(listener: (title: string) => void): Disposable;
+  onBell(listener: () => void): Disposable;
+  /** The program copied text (OSC 52). */
+  onClipboard(listener: (text: string) => void): Disposable;
   dispose(): Promise<void>;
 }
 
@@ -40,16 +45,34 @@ export interface TuiOptions {
   theme: { foreground: string; background: string; cursor: string; palette: string[] };
 }
 
+/** Marks the terminal's host element: keys typed in it belong to the program, not daimon. */
+export const TUI_ATTR = "data-tui";
+/** Whether a key/mouse event happened inside a full-screen program's terminal. */
+export const inTerminal = (e: Event) => !!(e.target as Element | null)?.closest?.(`[${TUI_ATTR}]`);
+
 export async function mountTui(el: HTMLElement, opts: TuiOptions): Promise<TuiTerminal> {
+  el.setAttribute(TUI_ATTR, "");
+  let t: TuiTerminal | null = null;
   if ("gpu" in navigator && window.isSecureContext) {
     try {
-      return await mountWraith(el, opts);
+      t = await mountWraith(el, opts);
     } catch (err) {
       console.warn("[tui] WebGPU terminal unavailable, using xterm:", err);
       el.replaceChildren(); // whatever a half-started mount left behind
     }
   }
-  return mountXterm(el, opts);
+  return t ?? mountXterm(el, opts);
+}
+
+// ── Clipboard ────────────────────────────────────────────────────────────────
+
+/** Put a program's copy (OSC 52, reported by the terminal) on the clipboard. It arrives with
+ *  output, not during a click or key press, so the page may not write the clipboard itself:
+ *  the native host does (app/src/bun/index.ts); a plain browser tries anyway. */
+export function writeClipboard(text: string) {
+  const host = (window as { __electrobunSendToHost?: (m: unknown) => void }).__electrobunSendToHost;
+  if (host) host({ type: "clipboard", text });
+  else navigator.clipboard.writeText(text).catch((err) => console.warn("[tui] clipboard write failed:", err));
 }
 
 // ── Wraith (WebGPU) ──────────────────────────────────────────────────────────
@@ -94,6 +117,10 @@ async function mountWraith(el: HTMLElement, opts: TuiOptions): Promise<TuiTermin
     onData: (l) => t.onData(l),
     onResize: (l) => t.onResize(l),
     onError: (l) => t.onError(l),
+    onTitleChange: (l) => t.onTitleChange(l),
+    onBell: (l) => t.onBell(l),
+    // OSC 52 and the ⌘C fix come from our wraithterm patch (ui/patches/).
+    onClipboard: (l) => t.onClipboard(l),
     dispose: () => { offMagnify(); return t.dispose(); },
   };
 }
@@ -240,6 +267,16 @@ function mountXterm(el: HTMLElement, opts: TuiOptions): TuiTerminal {
     onData: (l) => term.onData(l),
     onResize: (l) => term.onResize(l),
     onError: () => ({ dispose() {} }), // nothing asynchronous to report
+    onTitleChange: (l) => term.onTitleChange(l),
+    onBell: (l) => term.onBell(l),
+    // xterm's parser hands OSC 52 to a registered handler ("<targets>;<base64>").
+    onClipboard: (l) => term.parser.registerOscHandler(52, (data) => {
+      const b64 = data.slice(data.indexOf(";") + 1);
+      if (b64 && b64 !== "?") {
+        try { l(new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))); } catch { /* not base64 */ }
+      }
+      return true;
+    }),
     dispose: async () => {
       if (disposed) return;
       disposed = true;

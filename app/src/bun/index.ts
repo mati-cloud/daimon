@@ -161,7 +161,7 @@ win.on("focus", () => returnFocusToPage("native focus"));
 win.on("blur", () => focusLog("host", `native blur ${describeFocus(win.ptr)}`));
 
 // Messages from the page: window.__electrobunSendToHost({ type, ... }).
-type HostMessage = { type?: string; blur?: unknown; action?: unknown; msg?: unknown; edge?: unknown };
+type HostMessage = { type?: string; blur?: unknown; action?: unknown; msg?: unknown; edge?: unknown; text?: unknown };
 const hostMessageHandlers: ((msg: HostMessage) => void)[] = [];
 (win.webview as unknown as { on(name: string, handler: (event: unknown) => void): void }).on(
   "host-message",
@@ -170,6 +170,24 @@ const hostMessageHandlers: ((msg: HostMessage) => void)[] = [];
     if (msg) for (const handle of hostMessageHandlers) handle(msg);
   },
 );
+// A program's copy (OSC 52, see ui/src/lib/daimon/tuiTerminal.ts): written natively, since
+// the page may only write the clipboard during a click or key press and an OSC 52 copy
+// arrives with program output, after it.
+hostMessageHandlers.push((msg) => {
+  if (msg.type !== "clipboard" || typeof msg.text !== "string") return;
+  const cmd =
+    process.platform === "darwin" ? ["pbcopy"]
+    : isWindows ? ["powershell.exe", "-NoProfile", "-Command", "Set-Clipboard -Value ([Console]::In.ReadToEnd())"]
+    : process.env.WAYLAND_DISPLAY ? ["wl-copy"]
+    : ["xclip", "-selection", "clipboard"];
+  try {
+    const p = Bun.spawn(cmd, { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
+    p.stdin.write(msg.text);
+    p.stdin.end();
+  } catch (err) {
+    appWarn(`[main] clipboard write (${cmd[0]}) failed: ${String(err)}`);
+  }
+});
 // The last session's shell exited: close the window (the app exits with its last window).
 hostMessageHandlers.push((msg) => {
   if (msg.type === "quit") win.close();

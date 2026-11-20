@@ -25,6 +25,7 @@ import { useSyncExternalStore, type ComponentType, type ReactNode } from "react"
 import htm from "htm";
 import { toast } from "sonner";
 import { shell, openInBrowser, type ShellContext, type PluginEntry } from "./rpc";
+import { inTerminal } from "./tuiTerminal";
 import { setKeyLock } from "./keyLock";
 import { Keys, Kbd } from "@/components/daimon/Kbd";
 
@@ -120,6 +121,7 @@ function matches(combo: string, e: KeyboardEvent): boolean {
 }
 
 function onShortcutKey(e: KeyboardEvent) {
+  if (inTerminal(e)) return; // the full-screen program's keys
   const hit = shortcuts.get().find((s) => matches(s.combo, e));
   if (!hit) return;
   e.preventDefault();
