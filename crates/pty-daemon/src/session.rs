@@ -43,6 +43,10 @@ pub enum SessionCommand {
     Attach { req_id: String, tab_id: String },
     /// Make the running full-screen program repaint (after a reattach).
     Redraw { tab_id: String },
+    /// Whether the PTY is out of canonical (line) mode: true once a line editor or a
+    /// raw-mode program (ssh's live session) owns it. Cooked mode cuts typed lines at
+    /// MAX_CANON (1024 bytes on macOS), so long injected lines wait for raw mode.
+    TtyRaw { req_id: String, tab_id: String },
     /// Daemon build and session count (the app checks before replacing an old daemon).
     DaemonInfo { req_id: String },
     /// Stop the daemon (ends all sessions).
@@ -468,6 +472,15 @@ impl Session {
         w.write_all(data.as_bytes())?;
         Ok(())
     }
+    #[cfg(unix)]
+    pub fn tty_raw(&self) -> bool {
+        let Some(fd) = self.master.as_raw_fd() else { return false };
+        let mut t: libc::termios = unsafe { std::mem::zeroed() };
+        unsafe { libc::tcgetattr(fd, &mut t) == 0 && t.c_lflag & libc::ICANON == 0 }
+    }
+    #[cfg(not(unix))]
+    pub fn tty_raw(&self) -> bool { true }
+
     pub fn resize(&self, cols: u16, rows: u16) -> Result<()> {
         tracing::debug!("resize tab={} {}x{}", self.tab_id, cols, rows);
         self.master.resize(PtySize { cols, rows, pixel_width: 0, pixel_height: 0 })?;
@@ -586,6 +599,10 @@ impl SessionManager {
         if let Some(s) = self.sessions.get(tab_id) { s.redraw(); }
     }
 
+    pub fn tty_raw(&self, tab_id: &str) -> bool {
+        self.sessions.get(tab_id).is_some_and(|s| s.tty_raw())
+    }
+
     pub fn remote_listing(&self, tab_id: &str, cwd: &str) -> Option<Vec<(String, bool)>> {
         self.sessions.get(tab_id)?.remote_listing(cwd)
     }
@@ -620,6 +637,23 @@ mod tests {
         let bel = "\x1b]133;A{}\x07%";
         assert_eq!(&bel[..prompt_mark_end(bel).unwrap()], "\x1b]133;A{}\x07");
         assert_eq!(prompt_mark_end("no mark"), None);
+    }
+
+    /// tty_raw: false while a command runs on a cooked tty, true once it goes non-canonical.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn tty_raw_follows_icanon() {
+        let (tx, _rx) = mpsc::channel(1024);
+        let s = Session::spawn("tab-raw".into(), tx).unwrap();
+        let wait = || tokio::time::sleep(std::time::Duration::from_millis(800));
+        wait().await;
+        s.write("sleep 2\n", None).unwrap();
+        wait().await;
+        assert!(!s.tty_raw(), "running command on a cooked tty");
+        wait().await; wait().await;
+        s.write("stty -icanon; sleep 2\n", None).unwrap();
+        wait().await;
+        assert!(s.tty_raw(), "after stty -icanon");
     }
 
     /// Session spawns, receives output, exits cleanly.

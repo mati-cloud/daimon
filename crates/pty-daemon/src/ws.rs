@@ -215,6 +215,10 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
                         Ok(SessionCommand::Redraw { tab_id }) => {
                             mgr.lock().await.redraw(&tab_id);
                         }
+                        Ok(SessionCommand::TtyRaw { req_id, tab_id }) => {
+                            let raw = mgr.lock().await.tty_raw(&tab_id);
+                            let _ = client_tx.send(SessionEvent::Response { req_id, ok: true, data: serde_json::Value::Bool(raw) }).await;
+                        }
                         Ok(SessionCommand::DaemonInfo { req_id }) => {
                             let sessions = mgr.lock().await.len();
                             let data = serde_json::json!({ "build": crate::daemon_info::build_id(), "sessions": sessions, "pid": std::process::id(), "plugins": crate::plugins::PROTOCOL });

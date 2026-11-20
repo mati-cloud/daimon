@@ -229,6 +229,8 @@ export const shell = {
   write:  (tabId: string, data: string) => { send({ type: "write", tab_id: tabId, data }); return Promise.resolve(); },
   /** Make a resumed full-screen program repaint (resize dance → SIGWINCH). */
   redraw: (tabId: string) => { send({ type: "redraw", tab_id: tabId }); return Promise.resolve(); },
+  /** PTY out of canonical mode (a raw-mode program like ssh's live session owns it). */
+  ttyRaw: (tabId: string) => request<boolean>({ type: "ttyRaw", tab_id: tabId }),
   /** Write that starts a command; the daemon remembers `command` to label it on reattach. */
   writeCommand: (tabId: string, data: string, command: string) => { send({ type: "write", tab_id: tabId, data, command }); return Promise.resolve(); },
   /**

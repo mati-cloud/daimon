@@ -123,6 +123,16 @@ shell.onExit((tabId) => {
   }
 });
 
+// Standing prompt listener: in an SSH session, a marker without `ssh` is the local shell's
+// prompt — the connection ended (remote `exit`, or it dropped, possibly while idle). Leave
+// SSH mode so the next command is local again and the SSH indicator goes away.
+shell.onContext((tabId, ctx) => {
+  if (inDaimonifiedMap.get(tabId) && !ctx.ssh) {
+    inStreamingSessionMap.delete(tabId);
+    notifyDaimonify(tabId, false);
+  }
+});
+
 // Active run cleanups — lets cancel button force-abandon a stuck run. Keyed per run id so a
 // newer run can't orphan an older hung one (each run registers its own cleanup).
 const activeCleanups = new Map<string, (opts?: { cancelled?: boolean }) => void>();
@@ -429,6 +439,8 @@ export async function run(
   // If a streaming-interactive session (ssh/mosh) is active, commands sent here go to the
   // remote shell which never emits onContext — resolve on PTY exit instead.
   const insideInteractiveSession = isStreamingSession(tabId) || isAltScreen(tabId);
+  // Sent to the remote shell of an SSH session (see the onContext handler below).
+  const remoteRun = isDaimonified(tabId);
   // Start buffering all PTY bytes from this command so the inline terminal can replay on mount
   startReplay(tabId);
   if (isInteractive) notifyAltScreen(tabId, true);
@@ -454,8 +466,15 @@ export async function run(
   // From injection to the remote's first marker, output is the shell echoing the bootstrap
   // line (a wall of base64): kept out of the block.
   let daimonifyMuted = false;
-  const injectDaimonify = () => {
+  const injectDaimonify = async () => {
     if (done || daimonifyInjected) return;
+    // Only once ssh has put the local tty in raw mode (its session is up). Before that —
+    // connecting, host-key or password prompt — the tty is cooked: the line would land in
+    // that prompt, and cooked mode cuts it at MAX_CANON (1024 bytes on macOS), leaving a
+    // half line that the remote bash then reads as an unclosed `$(`.
+    const raw = await shell.ttyRaw(tabId).catch(() => true);
+    if (done || daimonifyInjected) return;
+    if (!raw) { daimonifyInjectTimer = setTimeout(injectDaimonify, 300); return; }
     daimonifyInjected = true;
     daimonifyMuted = true;
     shell.write(tabId, DAIMONIFY_INJECT).catch(() => {});
@@ -596,7 +615,11 @@ export async function run(
       }
       // A local marker for ssh: before it ran (startup prompt) is ignored below; after
       // (commandStarted) ssh has ended without daimonifying, so it finishes like any command.
-      if (!commandStarted) return; // ignore startup precmd prompt — wait for real command
+      // In an SSH session, a marker without `ssh` is the local shell's prompt: the session
+      // is over — remote `exit`, or the connection dropped (then the remote never sent its
+      // command-start marker). End the session, and this command with the local context.
+      const sshEnded = remoteRun && !ctx.ssh;
+      if (!commandStarted && !sshEnded) return; // ignore startup precmd prompt — wait for real command
       finalCtx = ctx;
       // Stop buffering immediately — the prompt line arrives after context and
       // would pollute normalBuf, causing parse() to produce different output than
