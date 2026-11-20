@@ -9,6 +9,7 @@ import {
 } from "./winBackdrop";
 import { enablePinchZoom } from "./macMagnification";
 import { setupNativeDrag } from "./macWindowDrag";
+import { setMinSize } from "./windowMinSize";
 import { describeFocus, isForeground } from "./winFocus";
 import { focusLog } from "./focusLog";
 import { prepareCustomFrame, startTopResize } from "./winFrame";
@@ -122,6 +123,7 @@ if (isWindows && !setWindowIcon(win.ptr, resolve(import.meta.dir, "../icon.ico")
 
 enablePinchZoom(); // macOS only
 setupNativeDrag(win); // macOS only — native drag via performWindowDragWithEvent
+setMinSize(win);
 
 // Window re-activated (un-minimize, alt-tab / click back from another app) or (un)maximized:
 // tell the page, so it can put the cursor back in the command input.
