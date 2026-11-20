@@ -54,13 +54,23 @@ export async function mountTui(el: HTMLElement, opts: TuiOptions): Promise<TuiTe
 
 // ── Wraith (WebGPU) ──────────────────────────────────────────────────────────
 
-/** Wraith rasterizes OpenType (not woff2) itself: the app's Geist Mono as TTF, SemiBold for
- *  bold, and JetBrains Mono (Wraith's default) for what Geist lacks — braille, more symbols. */
+/** Wraith rasterizes OpenType (not woff2) itself and has no system-font fallback (desktop apps
+ *  and native terminals get theirs from the OS), so the chain is shipped: the app's Geist
+ *  Mono as TTF (SemiBold for bold), JetBrains Mono for braille and box drawing, Noto
+ *  Symbols 2 / Symbols / Math for the rest TUIs draw (⏵ ⎿ ✻ ⏺ arrows, math, technical),
+ *  and Noto Color Emoji — its COLRv1 table only (SVG stripped: 25 MB → 5 MB), which
+ *  Wraith draws in colour. Fetched (then cached) when a full-screen program starts. */
 const fontUrl = (file: string) => new URL(`/fonts/terminal/${file}`, location.href);
 const TERMINAL_FONT = {
   font: fontUrl("GeistMono-Regular.ttf"),
   fontFaces: { bold: fontUrl("GeistMono-SemiBold.ttf") },
-  fallbackFonts: [fontUrl("JetBrainsMono-Regular.ttf")],
+  fallbackFonts: [
+    fontUrl("JetBrainsMono-Regular.ttf"),
+    fontUrl("NotoSansSymbols2-Regular.ttf"),
+    fontUrl("NotoSansSymbols.ttf"),
+    fontUrl("NotoSansMath-Regular.ttf"),
+    fontUrl("NotoColorEmoji.ttf"),
+  ],
 };
 
 async function mountWraith(el: HTMLElement, opts: TuiOptions): Promise<TuiTerminal> {
