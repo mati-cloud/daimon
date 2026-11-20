@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast, Toaster } from "sonner";
+import { PluginGate } from "@/components/daimon/PluginGate";
 import { PlusIcon, XIcon, SunIcon, ZapIcon, PanelLeftIcon, GitBranchIcon, SearchIcon, EyeOffIcon, EyeIcon, SplitSquareHorizontalIcon, ArrowUpRightIcon, LinkIcon } from "lucide-react";
 import { BlockMeta, BlockView, PresentationModeContext } from "@/components/daimon/BlockView";
 import { CommandIcon } from "@/components/daimon/CommandIcon";
@@ -1300,6 +1301,7 @@ function Daimon() {
     <PresentationModeContext.Provider value={presentationMode}>
     <div className="flex flex-col h-screen bg-transparent text-foreground overflow-hidden">
       <Toaster position="top-center" />
+      <PluginGate />
 
       <TitleBar left={sidebarOpen ? wordmark : null} />
 

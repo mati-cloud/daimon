@@ -91,8 +91,12 @@ pub enum SessionCommand {
     PrefSet { req_id: String, key: String, value: String },
     /// Get a preference value.
     PrefGet { req_id: String, key: String },
-    /// Source of every runtime UI plugin in ~/.config/daimon/plugins/.
+    /// Every runtime UI plugin in ~/.config/daimon/plugins/ (source only if approved).
     PluginList { req_id: String },
+    /// Approve a plugin as its file is now, behind an OS admin prompt.
+    PluginApprove { req_id: String, name: String },
+    /// Rename a plugin file out of the way (`.<file>.quarantined`) so it never loads.
+    PluginQuarantine { req_id: String, name: String },
     /// Run a program (no shell) for a plugin and return its exit code and output.
     Exec {
         req_id: String,

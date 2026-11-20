@@ -1,3 +1,5 @@
+// First: its key listeners must run before any other (see keyLock.ts).
+import "./lib/daimon/keyLock";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";

@@ -24,7 +24,8 @@ import * as jsxRuntime from "react/jsx-runtime";
 import { useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import htm from "htm";
 import { toast } from "sonner";
-import { shell, openInBrowser, type ShellContext } from "./rpc";
+import { shell, openInBrowser, type ShellContext, type PluginEntry } from "./rpc";
+import { setKeyLock } from "./keyLock";
 import { Keys, Kbd } from "@/components/daimon/Kbd";
 
 // ── Registries ───────────────────────────────────────────────────────────────────────────
@@ -332,8 +333,33 @@ async function applyPluginCss(plugins: PluginFile[]) {
   if (!el) document.head.append(style);
 }
 
+// ── Blocked plugins ──────────────────────────────────────────────────────────────────────
+// Plugins the daemon refused to hand over: new (e.g. dropped in by other software) or changed
+// since they were approved. PluginGate shows them in a modal that can't be dismissed: the
+// user approves (types the name + OS admin prompt) or quarantines each one.
+
+let blocked: readonly PluginEntry[] = [];
+const blockedListeners = new Set<() => void>();
+const subscribeBlocked = (fn: () => void) => { blockedListeners.add(fn); return () => { blockedListeners.delete(fn); }; };
+function setBlocked(next: PluginEntry[]) {
+  const key = (l: readonly PluginEntry[]) => l.map((p) => `${p.name}:${p.sha256}`).join("|");
+  if (key(next) === key(blocked)) return;
+  blocked = next;
+  setKeyLock(next.length > 0); // PluginGate is up: no shortcuts until it's resolved
+  blockedListeners.forEach((fn) => fn());
+}
+
+export const useBlockedPlugins = (): readonly PluginEntry[] =>
+  useSyncExternalStore(subscribeBlocked, () => blocked, () => blocked);
+
+/** Approve via the daemon's OS admin prompt; resolves once the user answered it. */
+export const approvePlugin = (name: string) => shell.pluginApprove(name);
+export const quarantinePlugin = (name: string) => shell.pluginQuarantine(name);
+
 async function loadAll() {
-  const plugins = await shell.pluginList();
+  const all = await shell.pluginList();
+  const plugins = all.filter((p): p is PluginEntry & { source: string } => p.approved && typeof p.source === "string");
+  setBlocked(all.filter((p) => !p.approved));
 
   for (const { name, fn } of cleanups) {
     try { fn(); } catch (e) { reportError(name, e); }

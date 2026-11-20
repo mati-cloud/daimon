@@ -8,6 +8,19 @@ import type { GitBranchNode } from "./shell";
 /// gets no token, and the daemon also refuses any web origin but the app's own.
 
 type Creds = { token: string; port: number };
+
+/** A plugin file as the daemon reports it. `source` only when approved (see plugins.rs). */
+export type PluginEntry = {
+  name: string;
+  file: string;
+  sha256: string;
+  findings: { id: string; what: string; privileged: boolean }[];
+  approved: boolean;
+  /** An unmodified copy of a plugin that ships with daimon. */
+  official: boolean;
+  reason?: string;
+  source?: string;
+};
 const CREDS_KEY = "daimon-daemon";
 
 function credsFromUrl(): Creds | null {
@@ -282,7 +295,11 @@ export const shell = {
   prefGet:             (key: string) => request<string | null>({ type: "prefGet", key }),
   /** `plugins`: plugin protocol version; missing on daemons that predate plugins. */
   daemonInfo:          () => request<{ build: string; sessions: number; pid: number; plugins?: number }>({ type: "daemonInfo" }, 15000),
-  pluginList:          () => request<{ name: string; file: string; source: string }[]>({ type: "pluginList" }, 15000),
+  pluginList:          () => request<PluginEntry[]>({ type: "pluginList" }, 15000),
+  /** Approve a plugin as its file is now. The daemon shows the OS admin prompt; waits for the user. */
+  pluginApprove:       (name: string) => request<{ approved: boolean; error?: string; command?: string }>({ type: "pluginApprove", name }, 10 * 60_000),
+  /** Rename a blocked plugin to `.<file>.quarantined` so it never loads. */
+  pluginQuarantine:    (name: string) => request<{ ok: boolean; error?: string; path?: string }>({ type: "pluginQuarantine", name }),
   exec:                (cmd: string, args: string[] = [], opts: { cwd?: string; env?: Record<string, string>; timeoutMs?: number } = {}) => {
     const timeoutMs = opts.timeoutMs ?? 10000;
     return request<{ code: number | null; stdout: string; stderr: string }>(

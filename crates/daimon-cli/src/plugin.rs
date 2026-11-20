@@ -62,6 +62,10 @@ function Hostname() {
 registerHeaderButton("hostname", Hostname);
 "#;
 
+/// Plugins are blocked until approved (the daemon's plugins.rs); every edit needs a new approval.
+const APPROVE_NOTE: &str = "note: daimon blocks a plugin until you approve it (Approve… in the app, behind an admin password prompt); \
+     any edit to the file blocks it again until you re-approve";
+
 /// Plugins that ship with daimon (the repo's plugins/ folder), for `daimon plugin add`.
 const BUNDLED: &[(&str, &str)] = &[
     ("kubernetes", include_str!("../../../plugins/kubernetes.tsx")),
@@ -92,6 +96,7 @@ pub fn run_add(name: Option<&str>, force: bool) -> Result<()> {
         std::fs::write(&path, source)?;
         println!("added   {}", path.display());
     }
+    println!("{APPROVE_NOTE}");
     Ok(())
 }
 
@@ -113,6 +118,7 @@ pub fn run_init() -> Result<()> {
         }
     }
     println!("\nopen {} in your editor; daimon picks up saved changes live", dir.display());
+    println!("{APPROVE_NOTE}");
 
     let legacy = config.join("plugins.tsx");
     if legacy.exists() {

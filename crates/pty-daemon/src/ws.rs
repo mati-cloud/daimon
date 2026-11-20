@@ -436,6 +436,20 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
                                 let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
                             });
                         }
+                        Ok(SessionCommand::PluginQuarantine { req_id, name }) => {
+                            let tx = client_tx.clone();
+                            tokio::task::spawn_blocking(move || {
+                                let data = crate::plugins::quarantine(&name);
+                                let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
+                            });
+                        }
+                        Ok(SessionCommand::PluginApprove { req_id, name }) => {
+                            let tx = client_tx.clone();
+                            tokio::spawn(async move {
+                                let data = crate::plugins::approve(name).await;
+                                let _ = tx.send(SessionEvent::Response { req_id, ok: true, data }).await;
+                            });
+                        }
                         Ok(SessionCommand::Exec { req_id, cmd, args, cwd, env, timeout_ms }) => {
                             let tx = client_tx.clone();
                             tokio::spawn(async move {
