@@ -170,6 +170,10 @@ const hostMessageHandlers: ((msg: HostMessage) => void)[] = [];
     if (msg) for (const handle of hostMessageHandlers) handle(msg);
   },
 );
+// The last session's shell exited: close the window (the app exits with its last window).
+hostMessageHandlers.push((msg) => {
+  if (msg.type === "quit") win.close();
+});
 // The page's half of the focus log.
 hostMessageHandlers.push((msg) => {
   if (msg.type === "focus-log" && typeof msg.msg === "string") focusLog("page", msg.msg);

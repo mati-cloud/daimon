@@ -612,6 +612,24 @@ function Daimon() {
     });
   };
 
+  // The shell itself exited (`exit`, Ctrl+D, logout): close its session, as a terminal
+  // closes the tab. The last one closes the window, which quits the app.
+  useEffect(() => {
+    const off = shell.onExit((tabId) => setSessions((prev) => {
+      if (!prev.some((s) => s.id === tabId)) return prev;
+      const next = prev.filter((s) => s.id !== tabId).map((s) => (s.splitId === tabId ? removeSplit(s) : s));
+      if (next.length > 0) return next;
+      const host = (window as { __electrobunSendToHost?: (m: unknown) => void }).__electrobunSendToHost;
+      setTimeout(() => (host ? host({ type: "quit" }) : window.close()), 0);
+      return prev;
+    }));
+    return () => { off(); };
+  }, []);
+  // Its session gone, the active one is a neighbour.
+  useEffect(() => {
+    if (!sessions.some((s) => s.id === activeId)) setActiveId(sessions[sessions.length - 1]!.id);
+  }, [sessions, activeId]);
+
   const focusComposer = (sessionId?: string) =>
     window.dispatchEvent(new CustomEvent("focus-composer", { detail: sessionId ? { sessionId } : undefined }));
 
