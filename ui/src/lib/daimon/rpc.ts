@@ -4,8 +4,8 @@ import type { GitBranchNode } from "./shell";
 ///
 /// The daemon only accepts clients with its token. The app passes it (and the port) in
 /// the page URL — ?daimon_token=…&daimon_port=… — and we keep it in sessionStorage so
-/// reloads work after the URL is cleaned up. In a plain browser on the Vite dev server,
-/// it comes from the dev server's /__daimon endpoint instead (same-origin only).
+/// reloads work after the URL is cleaned up. There is no other way in: a plain browser tab
+/// gets no token, and the daemon also refuses any web origin but the app's own.
 
 type Creds = { token: string; port: number };
 const CREDS_KEY = "daimon-daemon";
@@ -26,15 +26,6 @@ let creds: Creds | null = (() => {
   if (fromUrl) { try { sessionStorage.setItem(CREDS_KEY, JSON.stringify(fromUrl)); } catch { /**/ } return fromUrl; }
   try { const saved = sessionStorage.getItem(CREDS_KEY); return saved ? JSON.parse(saved) as Creds : null; } catch { return null; }
 })();
-
-async function fetchDevCreds(): Promise<Creds | null> {
-  try {
-    const r = await fetch("/__daimon", { cache: "no-store" });
-    if (!r.ok) return null;
-    const c = await r.json() as Creds;
-    return c.token ? c : null;
-  } catch { return null; }
-}
 
 export type ShellContext = {
   pwd?: string;
@@ -103,7 +94,6 @@ function request<T>(msg: object, timeoutMs = 5000): Promise<T> {
 
 let ws: WebSocket | null = null;
 const pending: string[] = [];
-let failures = 0;
 let everConnected = false;
 
 /** Main-thread time spent on daemon messages (read by bench mode, see bench.ts). */
@@ -117,20 +107,12 @@ export function onReconnect(fn: () => void): () => void {
 }
 
 async function connect() {
-  // No token yet, or it keeps getting refused (daemon replaced): ask the dev server.
-  if (!creds || failures >= 2) {
-    const dev = await fetchDevCreds();
-    if (dev) { creds = dev; try { sessionStorage.setItem(CREDS_KEY, JSON.stringify(dev)); } catch { /**/ } }
+  if (!creds) {
+    console.warn("[rpc] no daemon token — start daimon through the app (or dev.sh)");
+    return;
   }
-  // No token anywhere: try without one. Only a daemon from before token auth accepts
-  // that (a dev session started by an old dev.sh); current daemons refuse it.
-  if (!creds) console.warn("[rpc] no daemon token — start daimon through the app (or dev.sh)");
-  let opened = false;
-  ws = new WebSocket(creds
-    ? `ws://localhost:${creds.port}/?token=${encodeURIComponent(creds.token)}`
-    : "ws://localhost:7878");
+  ws = new WebSocket(`ws://localhost:${creds.port}/?token=${encodeURIComponent(creds.token)}`);
   ws.onopen = () => {
-    opened = true; failures = 0;
     while (pending.length) ws!.send(pending.shift()!);
     // Events sent while we were away are gone: let the UI resync its sessions.
     if (everConnected) reconnectListeners.forEach((fn) => fn());
@@ -138,7 +120,6 @@ async function connect() {
   };
   ws.onclose = () => {
     ws = null;
-    if (!opened) failures++;
     // Reject all pending requests so callers don't hang across reconnect
     for (const [, p] of pendingRequests) p.reject(new Error("disconnected"));
     pendingRequests.clear();

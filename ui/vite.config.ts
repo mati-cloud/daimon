@@ -5,22 +5,35 @@ import path from "path";
 import { wraith } from "wraithterm/vite";
 import type { Plugin } from "vite";
 
-// Dev only: hands the pty-daemon's token to the page when it's opened in a plain
-// browser (the app passes it in the URL instead). dev.sh exports DAIMON_TOKEN and
-// DAIMON_PORT. Same-origin only — no CORS headers, and Vite rejects foreign Host
-// headers — so other sites can't read it.
-const daimonToken = (): Plugin => ({
-  name: "daimon-token",
-  apply: "serve",
-  configureServer(server) {
-    server.middlewares.use("/__daimon", (_req, res) => {
-      const token = process.env["DAIMON_TOKEN"];
-      res.setHeader("Cache-Control", "no-store");
-      if (!token) { res.statusCode = 404; res.end(); return; }
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ token, port: Number(process.env["DAIMON_PORT"]) || 7878 }));
-    });
-  },
+// Content-Security-Policy for the shipped page (build only: Vite's dev server needs inline
+// scripts for HMR). Any injected script is limited to the app's own code and the local
+// daemon: no remote scripts, frames, forms or connections.
+//   script-src blob:            plugins and their module shims are imported from blob: URLs
+//   'wasm-unsafe-eval'          the terminal renderer's WebAssembly
+//   style-src 'unsafe-inline'   coloured output is <span style>, plugin CSS is a <style>
+//   img-src https:              link-preview images and favicons
+//   connect-src ws://localhost  the pty-daemon (port chosen at runtime)
+export const CSP = [
+  "default-src 'none'",
+  "script-src 'self' blob: 'wasm-unsafe-eval'",
+  "worker-src 'self' blob:",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  "media-src 'self' data: blob:",
+  "connect-src 'self' ws://localhost:* ws://127.0.0.1:*",
+  "object-src 'none'",
+  "frame-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join("; ");
+
+const csp = (): Plugin => ({
+  name: "daimon-csp",
+  apply: "build",
+  transformIndexHtml: () => [
+    { tag: "meta", attrs: { "http-equiv": "Content-Security-Policy", content: CSP }, injectTo: "head-prepend" },
+  ],
 });
 
 export default defineConfig({
@@ -30,7 +43,7 @@ export default defineConfig({
     __USER__: JSON.stringify(process.env.USER ?? ""),
   },
   // wraith(): keeps wraithterm's worker / wasm / font URLs intact through dep prebundling.
-  plugins: [react(), tailwindcss(), wraith(), daimonToken()],
+  plugins: [react(), tailwindcss(), wraith(), csp()],
   resolve: {
     dedupe: ["react", "react-dom"],
     alias: {
@@ -40,7 +53,8 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    sourcemap: true,
+    // Never ship source maps.
+    sourcemap: false,
     rolldownOptions: {
       input: "index.html",
       output: {
@@ -62,5 +76,6 @@ export default defineConfig({
       },
     },
   },
-  server: { port: 7881 },
+  // Dev server (loopback by default), fixed port (the app's dev build loads it).
+  server: { port: 7881, strictPort: true },
 });

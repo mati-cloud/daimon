@@ -14,6 +14,71 @@ use tokio_tungstenite::tungstenite::Message;
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
+
+/// Web origins allowed to connect: the app's bundled UI only. Debug builds (dev.sh) also
+/// allow the Vite dev server the dev app loads. Release builds never do.
+fn allowed_origin(origin: &str) -> bool {
+    origin == "views://daimon2"
+        || (cfg!(debug_assertions) && matches!(origin, "http://localhost:7881" | "http://127.0.0.1:7881"))
+}
+
+/// Who may open a WebSocket (all three checks must pass):
+/// - Host is loopback with our port: a DNS-rebinding page (evil.example → 127.0.0.1)
+///   still sends its own name and is refused.
+/// - Origin, if any, is the app's own. Browsers always send it on a WebSocket handshake
+///   and pages can't forge it, so no website can talk to the daemon, even with the token.
+///   No Origin = a native client (the app's main process); those still need the token.
+/// - The token (`?token=`), compared in constant time.
+fn authorize(host: Option<&str>, origin: Option<&str>, query: Option<&str>, token: &str, port: u16) -> std::result::Result<(), &'static str> {
+    let host_ok = host.is_some_and(|h| {
+        h.rsplit_once(':').is_some_and(|(name, p)| {
+            p.parse() == Ok(port) && matches!(name.to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1" | "[::1]")
+        })
+    });
+    if !host_ok {
+        return Err("Host isn't loopback");
+    }
+    if origin.is_some_and(|o| !allowed_origin(o)) {
+        return Err("web origin not allowed");
+    }
+    let token_ok = query.is_some_and(|q| {
+        q.split('&').any(|kv| kv.strip_prefix("token=").is_some_and(|t| constant_time_eq(t.as_bytes(), token.as_bytes())))
+    });
+    if !token_ok {
+        return Err("bad or missing token");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::authorize;
+    const T: &str = "secret";
+    const Q: Option<&str> = Some("token=secret");
+
+    #[test]
+    fn app_and_native_clients_pass() {
+        assert!(authorize(Some("localhost:7878"), Some("views://daimon2"), Q, T, 7878).is_ok());
+        assert!(authorize(Some("127.0.0.1:7878"), None, Q, T, 7878).is_ok());
+        assert!(authorize(Some("[::1]:7878"), None, Some("a=1&token=secret"), T, 7878).is_ok());
+    }
+
+    #[test]
+    fn websites_are_refused_even_with_the_token() {
+        for o in ["https://evil.example", "null", "http://localhost:8080", "views://other", "file://"] {
+            assert!(authorize(Some("localhost:7878"), Some(o), Q, T, 7878).is_err(), "{o}");
+        }
+    }
+
+    #[test]
+    fn rebinding_and_bad_tokens_are_refused() {
+        assert!(authorize(Some("evil.example:7878"), None, Q, T, 7878).is_err());
+        assert!(authorize(Some("localhost:7879"), None, Q, T, 7878).is_err());
+        assert!(authorize(None, None, Q, T, 7878).is_err());
+        assert!(authorize(Some("localhost:7878"), None, Some("token=secreT"), T, 7878).is_err());
+        assert!(authorize(Some("localhost:7878"), None, None, T, 7878).is_err());
+    }
+}
 use tracing::{error, info, warn};
 
 /// How long the event bus waits on one client before giving up on it.
@@ -84,16 +149,18 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
         clients.lock().await.push(Client { tx: client_tx.clone(), kill: kill.clone() });
 
         tokio::spawn(async move {
-            // Every client must present the token (?token=…): the daemon runs shells, and
-            // any web page can open a WebSocket to localhost.
+            // The daemon runs shells, so every handshake is checked (see `authorize`).
             let check = |req: &Request, resp: Response| -> std::result::Result<Response, ErrorResponse> {
-                let ok = req.uri().query().is_some_and(|q| {
-                    q.split('&').any(|kv| kv.strip_prefix("token=").is_some_and(|t| constant_time_eq(t.as_bytes(), token.as_bytes())))
-                });
-                if ok { return Ok(resp); }
-                let mut deny = ErrorResponse::new(Some("unauthorized".into()));
-                *deny.status_mut() = tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED;
-                Err(deny)
+                let header = |name: &str| req.headers().get(name).and_then(|v| v.to_str().ok());
+                match authorize(header("host"), header("origin"), req.uri().query(), &token, port) {
+                    Ok(()) => Ok(resp),
+                    Err(why) => {
+                        warn!("refused connection from {addr}: {why} (origin {:?})", header("origin"));
+                        let mut deny = ErrorResponse::new(Some("unauthorized".into()));
+                        *deny.status_mut() = tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN;
+                        Err(deny)
+                    }
+                }
             };
             let ws = match tokio_tungstenite::accept_hdr_async(stream, check).await {
                 Ok(ws) => ws,
