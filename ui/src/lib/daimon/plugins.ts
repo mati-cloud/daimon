@@ -359,7 +359,11 @@ export const approvePlugin = (name: string) => shell.pluginApprove(name);
 export const quarantinePlugin = (name: string) => shell.pluginQuarantine(name);
 
 async function loadAll() {
-  const all = await shell.pluginList();
+  // A daemon from before plugin approval (kept running for its sessions) sends only
+  // { name, file, source } and serves every plugin: load them as it did, no gate — it has no
+  // approve/quarantine to answer one with. It's replaced by the new build once idle.
+  const all = (await shell.pluginList()).map((p) =>
+    p.approved === undefined ? { ...p, approved: true, findings: [], official: false, sha256: "" } : p);
   const plugins = all.filter((p): p is PluginEntry & { source: string } => p.approved && typeof p.source === "string");
   setBlocked(all.filter((p) => !p.approved));
 
