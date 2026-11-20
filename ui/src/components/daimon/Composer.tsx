@@ -17,6 +17,20 @@ function formatTs(ts: number): string {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+
+function commonPrefix(values: string[]): string {
+  let p = values[0] ?? "";
+  for (const v of values) while (!v.startsWith(p)) p = p.slice(0, -1);
+  return p;
+}
+
+/** Inline ghost text: what the top suggestion adds to the typed token, if it extends it. */
+function ghostOf(top: Suggestion | undefined, token: string): string {
+  return top && top.replace === "token" && token && top.value.toLowerCase().startsWith(token.toLowerCase())
+    ? top.value.slice(token.length)
+    : "";
+}
+
 export function Composer({
   cwd,
   ctx,
@@ -107,10 +121,8 @@ export function Composer({
 
   const visible = open && items.length >= 2;
   const top = items[Math.min(active, items.length - 1)];
-  // Inline ghost: top token-replacing suggestion whose value extends the typed token.
-  const specGhost = top && top.replace === "token" && top.kind !== "file" && top.kind !== "dir" && token && top.value.toLowerCase().startsWith(token.toLowerCase())
-    ? top.value.slice(token.length)
-    : "";
+  // Inline ghost: the rest of the top suggestion (flag, subcommand, file, folder…).
+  const specGhost = ghostOf(top, token);
 
   // History ghost: most-recent match for the full input — only when no spec/flag completions available
   const hasNativeItems = items.some(i => i.kind !== "history");
@@ -219,16 +231,37 @@ export function Composer({
     }
     // Compute ghost inline from current (state may not have updated yet)
     const currentTop = current[0];
-    const currentGhost = currentTop && currentTop.replace === "token" && currentTop.kind !== "file" && currentTop.kind !== "dir" && currentToken && currentTop.value.toLowerCase().startsWith(currentToken.toLowerCase())
-      ? currentTop.value.slice(currentToken.length)
-      : "";
-    if (current.length === 1 || (current.length > 0 && currentGhost)) { accept(0, current); return; }
+    const currentGhost = ghostOf(currentTop, currentToken);
+    // Paths with several matches complete like a shell: the part they share, then the list.
+    const isPath = currentTop?.kind === "file" || currentTop?.kind === "dir";
+    if (current.length === 1 || (current.length > 0 && currentGhost && !isPath)) { accept(0, current); return; }
+    if (current.length > 1 && isPath) {
+      const common = commonPrefix(current.map((i) => i.value));
+      if (common.length > currentToken.length && !/[\s'"\\]/.test(common)) {
+        setInputValue(value.slice(0, value.length - currentToken.length) + common);
+        return;
+      }
+    }
     if (current.length > 1) { dismissed.current = false; setOpen(true); return; }
     if (historyGhost) { setInputValue(value + historyGhost); setOpen(false); return; }
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (interactive) return;
+    // Home / End (Fn+←/→ on a Mac, which would otherwise only scroll): very start / end of
+    // the command; with Shift, select up to there.
+    if ((e.key === "Home" || e.key === "End") && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      const el = e.currentTarget;
+      const to = e.key === "Home" ? 0 : el.value.length;
+      if (!e.shiftKey) el.setSelectionRange(to, to);
+      else {
+        // Extend from the end the selection was anchored at.
+        const anchor = el.selectionDirection === "backward" ? el.selectionEnd : el.selectionStart;
+        el.setSelectionRange(Math.min(anchor, to), Math.max(anchor, to), to < anchor ? "backward" : "forward");
+      }
+      return;
+    }
     // disabled = command running (stdin mode) — allow input but skip completions/history
     if (disabled) {
       if (e.ctrlKey && e.key === "c") {
@@ -263,6 +296,8 @@ export function Composer({
       const el = inputRef.current;
       if (ghost && el && el.selectionStart === value.length && el.selectionEnd === value.length) {
         e.preventDefault();
+        // → takes exactly the ghost shown (Tab may complete only a shared prefix).
+        if (specGhost) { accept(0); return; }
         acceptGhost();
         return;
       }
