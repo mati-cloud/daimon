@@ -181,9 +181,23 @@ let notifThreshold = 10_000;
 export function setNotifConfig(enabled: boolean, thresholdMs: number) {
   notifEnabled = enabled;
   notifThreshold = thresholdMs;
-  if (enabled && Notification.permission === "default") {
-    Notification.requestPermission().catch(() => {});
-  }
+  if (enabled && Notification.permission === "default") askOnGesture();
+}
+
+// WebKit only allows the permission prompt from a user gesture, and the config is set on
+// load: ask on the first click or key press instead.
+let askPending = false;
+function askOnGesture() {
+  if (askPending) return;
+  askPending = true;
+  const ask = () => {
+    removeEventListener("pointerdown", ask, true);
+    removeEventListener("keydown", ask, true);
+    askPending = false;
+    if (notifEnabled && Notification.permission === "default") Notification.requestPermission().catch(() => {});
+  };
+  addEventListener("pointerdown", ask, true);
+  addEventListener("keydown", ask, true);
 }
 
 function maybeNotify(cmd: string, ms: number) {
