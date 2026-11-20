@@ -1,0 +1,131 @@
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 4c612a6e85ad6074ed080abcf71d213bdb7ae939..576665726a88d612debca0bbbf0587e0340341b7 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -145,6 +145,8 @@ export declare class Wraith {
+     onBytes(listener: Listener<Uint8Array>): Disposable;
+     onTitleChange(listener: Listener<string>): Disposable;
+     onBell(listener: Listener<void>): Disposable;
++    /** daimon patch — the program copied text (OSC 52). Writing it is up to the embedder. */
++    onClipboard(listener: Listener<string>): Disposable;
+     onError(listener: Listener<Error>): Disposable;
+     onStats(listener: Listener<WraithStats>): Disposable;
+     private statsObserved;
+diff --git a/dist/index.js b/dist/index.js
+index fb8dcf2a0b6d1208257e916ece0474474396e822..aeddaa17d3be46a3e36dae587e8fb60e83151a24 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -225,6 +225,7 @@ export class Wraith {
+     binary = new Signal();
+     title = new Signal();
+     bell = new Signal();
++    clipboard = new Signal();
+     errors = new Signal();
+     statistics = new Signal();
+     resizes = new Signal();
+@@ -529,6 +530,9 @@ export class Wraith {
+             case 'bell':
+                 this.bell.emit();
+                 break;
++            case 'clipboard':
++                this.clipboard.emit(reply.text);
++                break;
+             case 'modes':
+                 this.mouseTracking = reply.mouse;
+                 this.alternateScroll = reply.alternateScroll;
+@@ -841,6 +845,10 @@ export class Wraith {
+     onBell(listener) {
+         return this.bell.on(listener);
+     }
++    /** daimon patch — the program copied text (OSC 52). Writing it is up to the embedder. */
++    onClipboard(listener) {
++        return this.clipboard.on(listener);
++    }
+     onError(listener) {
+         return this.errors.on(listener);
+     }
+@@ -1186,10 +1194,18 @@ export class Wraith {
+             }
+             if ((event.metaKey || (event.ctrlKey && event.shiftKey)) &&
+                 event.key.toLowerCase() === 'c') {
++                // daimon patch — nothing selected: leave the clipboard alone (it may hold what
++                // the program just copied). WebKit lets a page write the clipboard only during
++                // the key event, so the item is handed over now and its text resolves after
++                // the worker answers.
++                if (!this.selected)
++                    return;
+                 event.preventDefault();
+-                void this.getText(true)
+-                    .then((text) => navigator.clipboard.writeText(text))
+-                    .catch((error) => this.errors.emit(error));
++                const text = this.getText(true);
++                const done = typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write
++                    ? navigator.clipboard.write([new ClipboardItem({ 'text/plain': text.then((t) => new Blob([t], { type: 'text/plain' })) })])
++                    : text.then((t) => navigator.clipboard.writeText(t));
++                void done.catch((error) => this.errors.emit(error));
+                 return;
+             }
+             if ((event.metaKey || (event.ctrlKey && event.shiftKey)) && event.key.toLowerCase() === 'v')
+@@ -1286,7 +1302,12 @@ export class Wraith {
+             this.send({
+                 type: 'mouse',
+                 action,
+-                button: event.buttons === 0 && action === 2 ? 0 : ([1, 3, 2][event.button] ?? 0),
++                // daimon patch — a move's `event.button` is -1: the button held during a drag
++                // comes from `buttons` (bits: 1 left, 2 right, 4 middle). Without it every drag
++                // reached the program as button-less motion, which drag tracking (1002) drops.
++                button: action === 2
++                    ? (event.buttons & 1 ? 1 : event.buttons & 2 ? 2 : event.buttons & 4 ? 3 : 0)
++                    : ([1, 3, 2][event.button] ?? 0),
+                 mods: mods(event),
+                 x: Math.max(0, Math.min(this.cols * this.cellWidth - 1, (event.clientX - rect.left) * this.dpr)),
+                 y: Math.max(0, Math.min(this.rows * this.cellHeight - 1, (event.clientY - rect.top) * this.dpr)),
+diff --git a/dist/worker.js b/dist/worker.js
+index f14168c9a0654963f25771c936d8fc8bd68bcbc6..62b4ebc200a5b459af605160d5f1c5ff3f4ce5c9 100644
+--- a/dist/worker.js
++++ b/dist/worker.js
+@@ -396,6 +396,36 @@ function createSession(endpoint, onClose, shared) {
+         engine.release_hold();
+         schedule();
+     }
++    // daimon patch — OSC 52 clipboard writes. The engine drops them (it reports only title
++    // and bell), so they are read from the bytes on their way in and posted like those.
++    // A "?" read query is never answered. A copy split across writes is carried over.
++    const latin1 = new TextDecoder('latin1');
++    const utf8 = new TextDecoder();
++    const OSC52 = /\x1b\]52;[^;\x07\x1b]*;([A-Za-z0-9+/=]*)(\x07|\x1b\\)?/g;
++    let osc52Carry = '';
++    function clipboardWrites(bytes) {
++        const text = osc52Carry + latin1.decode(bytes);
++        osc52Carry = '';
++        if (!text.includes('\x1b]52;'))
++            return;
++        for (const match of text.matchAll(OSC52)) {
++            if (!match[2]) {
++                // Cut off by the end of this write: the rest arrives with the next one
++                // (capped: not a copy). Anything else unterminated isn't a copy (a "?" query).
++                if (match.index + match[0].length === text.length && text.length - match.index < 8 << 20)
++                    osc52Carry = text.slice(match.index);
++                continue;
++            }
++            if (!match[1])
++                continue;
++            try {
++                post({ type: 'clipboard', text: utf8.decode(Uint8Array.from(atob(match[1]), (c) => c.charCodeAt(0))) });
++            }
++            catch {
++                // not base64
++            }
++        }
++    }
+     function drain() {
+         for (const [kind, bytes] of engine.take_events()) {
+             if (kind === 0)
+@@ -689,6 +719,7 @@ function createSession(endpoint, onClose, shared) {
+             throw new Error('Wraith engine is not running');
+         switch (command.type) {
+             case 'write': {
++                clipboardWrites(command.bytes);
+                 const marked = tracing && command.bytes.some((b) => b >= 0x61 && b <= 0x7a);
+                 engine.write(command.bytes);
+                 a11y.changed();
