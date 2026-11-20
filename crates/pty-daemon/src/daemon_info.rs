@@ -71,6 +71,9 @@ fn write_private(path: &PathBuf, contents: &str) -> Result<()> {
     #[cfg(unix)]
     {
         use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        // The folder holds the token: only its owner may list or enter it.
+        fs::set_permissions(path.parent().unwrap(), fs::Permissions::from_mode(0o700))?;
         use std::os::unix::fs::OpenOptionsExt;
         let mut f = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
         f.write_all(contents.as_bytes())?;
