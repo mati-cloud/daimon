@@ -1078,6 +1078,14 @@ function Daimon() {
       return;
     }
 
+    // Several lines: one block each, run in order. A line ending in `\` continues onto the next.
+    // ponytail: splits multi-line constructs (for/if/heredoc) too; detect those if anyone pastes them.
+    const lines = cmd.split(/(?<!\\)\n/).filter((l) => l.trim());
+    if (lines.length > 1) {
+      for (const line of lines) await submit(line, sessionId, secret);
+      return;
+    }
+
     if (secret) {
       await runBlock(sessionId, cmd, sess.state, undefined, true);
       return;
