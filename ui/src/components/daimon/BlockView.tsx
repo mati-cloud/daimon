@@ -2794,7 +2794,7 @@ function LinkCard({ p }: { p: LinkPreview }) {
   );
 }
 
-function BlockViewImpl({ block, modeActive = false, onRerun, isLast, currentCtx = "", sessionId = "", isTuiActive = false, gazeFocused = false, promptingForInput = false, onSearch, onPathClick }: { block: Block; modeActive?: boolean; onRerun: (cmd: string) => void; isLast?: boolean; currentCtx?: string; sessionId?: string; isTuiActive?: boolean; gazeFocused?: boolean; promptingForInput?: boolean; onSearch?: ((q: string) => void) | null; onPathClick?: (path: string) => void }) {
+function BlockViewImpl({ block, modeActive = false, onRerun, isLast, currentCtx = "", sessionId = "", isTuiActive = false, promptingForInput = false, onSearch, onPathClick }: { block: Block; modeActive?: boolean; onRerun: (cmd: string) => void; isLast?: boolean; currentCtx?: string; sessionId?: string; isTuiActive?: boolean; promptingForInput?: boolean; onSearch?: ((q: string) => void) | null; onPathClick?: (path: string) => void }) {
   const ok = block.code === 0;
   const failed = !block.pending && !ok;
   const [expanded, setExpandedRaw] = useState(true);
@@ -2953,7 +2953,7 @@ function BlockViewImpl({ block, modeActive = false, onRerun, isLast, currentCtx 
   }, [isLast, isLong, block.pending]);
 
   return (
-    <article className={`rise group relative pl-9 transition-[background-color,padding,margin,border-radius] duration-150 ${failed ? "rounded-lg bg-alarm/5 py-2 pr-3 -mx-3" : ""} ${gazeFocused ? "rounded-lg ring-1 ring-signal/40 bg-signal/[0.03] px-3 -mx-3" : ""}`}>
+    <article className={`rise group relative pl-9 transition-[background-color,padding,margin,border-radius] duration-150 ${failed ? "rounded-lg bg-alarm/5 py-2 pr-3 -mx-3" : ""}`}>
       {/* icon center = top-[7px] + half of size = 11px, matching the timeline line at left-[11px] */}
       <div aria-hidden className="absolute left-[5px] top-[7px]">
         {block.pending

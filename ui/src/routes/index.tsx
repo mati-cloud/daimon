@@ -397,7 +397,6 @@ function Daimon() {
     };
   }, [gitCwd, gitRefreshKey]);
 
-  // Gaze → block id mapping
   const cycleTheme = () => {
     const next: Theme = theme === "light" ? "dracula" : "light";
     setTheme(next);
