@@ -25,6 +25,9 @@ pub struct BlockRow {
     pub ts: i64,
     pub exit_code: i32,
     pub output_json: String,
+    /// `user@host` the command ran on over SSH; empty for local commands.
+    #[serde(default)]
+    pub ssh: String,
 }
 
 const BLOCK_RETENTION_DAYS: i64 = 30;
@@ -106,6 +109,12 @@ impl Store {
             END;
         ")?;
 
+        // Added later: databases from before have no `ssh` column yet.
+        let has_ssh: bool = conn.prepare("SELECT 1 FROM pragma_table_info('blocks') WHERE name='ssh'")?.exists([])?;
+        if !has_ssh {
+            conn.execute_batch("ALTER TABLE blocks ADD COLUMN ssh TEXT NOT NULL DEFAULT ''")?;
+        }
+
         // Backfill FTS for any existing blocks not yet indexed
         conn.execute_batch("
             INSERT OR IGNORE INTO blocks_fts(rowid, id, input, cwd, ts, exit_code)
@@ -162,9 +171,9 @@ impl Store {
     pub fn block_save(&self, b: &BlockRow) -> Result<()> {
         let conn = self.0.lock().unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO blocks(id,session_id,input,cwd,ctx,ts,exit_code,output_json)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
-            params![b.id, b.session_id, b.input, b.cwd, b.ctx, b.ts, b.exit_code, b.output_json],
+            "INSERT OR REPLACE INTO blocks(id,session_id,input,cwd,ctx,ts,exit_code,output_json,ssh)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![b.id, b.session_id, b.input, b.cwd, b.ctx, b.ts, b.exit_code, b.output_json, b.ssh],
         )?;
         Ok(())
     }
@@ -172,7 +181,7 @@ impl Store {
     pub fn blocks_for_session(&self, session_id: &str, limit: usize) -> Result<Vec<BlockRow>> {
         let conn = self.0.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id,session_id,input,cwd,ctx,ts,exit_code,output_json
+            "SELECT id,session_id,input,cwd,ctx,ts,exit_code,output_json,ssh
              FROM blocks WHERE session_id=?1 ORDER BY ts ASC LIMIT ?2"
         )?;
         let rows = stmt.query_map(params![session_id, limit as i64], |r| Ok(BlockRow {
@@ -184,6 +193,7 @@ impl Store {
             ts: r.get(5)?,
             exit_code: r.get(6)?,
             output_json: r.get(7)?,
+            ssh: r.get(8)?,
         }))?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -192,7 +202,7 @@ impl Store {
     pub fn blocks_recent(&self, limit: usize) -> Result<Vec<BlockRow>> {
         let conn = self.0.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id,session_id,input,cwd,ctx,ts,exit_code,output_json
+            "SELECT id,session_id,input,cwd,ctx,ts,exit_code,output_json,ssh
              FROM blocks ORDER BY ts DESC LIMIT ?1"
         )?;
         let rows = stmt.query_map(params![limit as i64], |r| Ok(BlockRow {
@@ -204,6 +214,7 @@ impl Store {
             ts: r.get(5)?,
             exit_code: r.get(6)?,
             output_json: r.get(7)?,
+            ssh: r.get(8)?,
         }))?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -220,7 +231,7 @@ impl Store {
         // Escape special FTS5 characters and append * for prefix matching
         let q = format!("\"{}\"*", query.replace('"', "\"\""));
         let mut stmt = conn.prepare(
-            "SELECT b.id, b.session_id, b.input, b.cwd, b.ctx, b.ts, b.exit_code, b.output_json
+            "SELECT b.id, b.session_id, b.input, b.cwd, b.ctx, b.ts, b.exit_code, b.output_json, b.ssh
              FROM blocks_fts f
              JOIN blocks b ON b.id = f.id
              WHERE blocks_fts MATCH ?1
@@ -235,6 +246,7 @@ impl Store {
             ts: r.get(5)?,
             exit_code: r.get(6)?,
             output_json: r.get(7)?,
+            ssh: r.get(8)?,
         }))?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }

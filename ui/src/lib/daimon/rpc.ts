@@ -290,13 +290,13 @@ export const shell = {
   historyAdd:          (cmd: string, ts: number) => request<boolean>({ type: "historyAdd", cmd, ts }),
   historyList:         (limit?: number) => request<{ id: number; cmd: string; ts: number; source: string }[]>({ type: "historyList", limit: limit ?? 1000000 }),
   historySearch:       (query: string, limit?: number) => request<{ id: number; cmd: string; ts: number; source: string }[]>({ type: "historySearch", query, limit: limit ?? 50 }),
-  blockSave:           (block: { id: string; session_id: string; input: string; cwd: string; ctx: string; ts: number; exit_code: number; output_json: string }) =>
+  blockSave:           (block: { id: string; session_id: string; input: string; cwd: string; ctx: string; ts: number; exit_code: number; output_json: string; ssh?: string }) =>
     request<boolean>({ type: "blockSave", block }),
   blockList:           (session_id: string, limit?: number) =>
-    request<{ id: string; session_id: string; input: string; cwd: string; ctx: string; ts: number; exit_code: number; output_json: string }[]>({ type: "blockList", session_id, limit: limit ?? 500 }),
+    request<{ id: string; session_id: string; input: string; cwd: string; ctx: string; ts: number; exit_code: number; output_json: string; ssh?: string }[]>({ type: "blockList", session_id, limit: limit ?? 500 }),
   blockRecent:         (limit?: number) =>
-    request<{ id: string; session_id: string; input: string; cwd: string; ctx: string; ts: number; exit_code: number; output_json: string }[]>({ type: "blockRecent", limit: limit ?? 200 }),
-  blockSearch:         (query: string, limit?: number) => request<{ id: string; session_id: string; input: string; cwd: string; ctx: string; ts: number; exit_code: number; output_json: string }[]>({ type: "blockSearch", query, limit: limit ?? 50 }),
+    request<{ id: string; session_id: string; input: string; cwd: string; ctx: string; ts: number; exit_code: number; output_json: string; ssh?: string }[]>({ type: "blockRecent", limit: limit ?? 200 }),
+  blockSearch:         (query: string, limit?: number) => request<{ id: string; session_id: string; input: string; cwd: string; ctx: string; ts: number; exit_code: number; output_json: string; ssh?: string }[]>({ type: "blockSearch", query, limit: limit ?? 50 }),
   blockClear:          (session_id: string) => request<boolean>({ type: "blockClear", session_id }),
   prefSet:             (key: string, value: string) => request<boolean>({ type: "prefSet", key, value }),
   prefGet:             (key: string) => request<string | null>({ type: "prefGet", key }),

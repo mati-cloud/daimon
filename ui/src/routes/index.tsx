@@ -282,7 +282,7 @@ function Daimon() {
       try { if (savedSessionsJson) savedSessions = JSON.parse(savedSessionsJson); } catch { /**/ }
 
       // Decode block rows → Block[]
-      const decodeBlocks = (rows: { id: string; session_id: string; input: string; cwd: string; ctx: string; ts: number; exit_code: number; output_json: string }[]) =>
+      const decodeBlocks = (rows: { id: string; session_id: string; input: string; cwd: string; ctx: string; ts: number; exit_code: number; output_json: string; ssh?: string }[]) =>
         rows.map(r => ({
           id: r.id,
           input: r.input,
@@ -294,6 +294,7 @@ function Daimon() {
           code: r.exit_code,
           out: (() => { try { return JSON.parse(r.output_json); } catch { return []; } })(),
           pending: false,
+          ...(r.ssh ? { ssh: r.ssh } : {}),
         }));
 
       if (savedSessions.length > 0) {
@@ -1136,6 +1137,7 @@ function Daimon() {
         ts: block.ts ?? Date.now(),
         exit_code: block.code ?? 0,
         output_json,
+        ssh: block.ssh ?? "",
       }).catch(() => {});
     };
     if (complete) {

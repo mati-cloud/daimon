@@ -375,6 +375,7 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
                                         ts: block["ts"].as_i64().unwrap_or(0),
                                         exit_code: block["exit_code"].as_i64().unwrap_or(0) as i32,
                                         output_json: block["output_json"].as_str().unwrap_or("[]").to_string(),
+                                        ssh: block["ssh"].as_str().unwrap_or("").to_string(),
                                     };
                                     db.block_save(&b)
                                 })();

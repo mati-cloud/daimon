@@ -20,6 +20,8 @@ export type Block = {
   code: number;
   out: Out[];
   pending?: boolean;
+  /** `user@host` (as typed to ssh) when the command ran in a daimonified SSH session. */
+  ssh?: string;
 };
 
 export type State = { cwd: string[]; ctx: { name: string }; gitBranch?: string };
@@ -108,9 +110,37 @@ const DAIMONIFY_PAYLOAD_B64 =
 // the line back; run() keeps that echo out of the block.
 const DAIMONIFY_INJECT = ` eval "$(printf %s ${DAIMONIFY_PAYLOAD_B64} | base64 -d | gzip -dc)"\n`;
 
+// ssh options that take a value (ssh(1) SYNOPSIS): the token after them isn't the destination.
+const SSH_VALUE_OPTS = new Set("BbcDEeFIiJLlmOoPpQRSWw".split(""));
+
+/** The destination of an `ssh …` command line (`user@host` or `host`), or null. */
+export function sshDest(cmd: string): string | null {
+  const tokens = cmd.trim().split(/\s+/);
+  if (tokens[0] !== "ssh") return null;
+  for (let i = 1; i < tokens.length; i++) {
+    const t = tokens[i]!;
+    if (t === "--") return tokens[i + 1] ?? null;
+    if (!t.startsWith("-")) return t;
+    // -p22 carries its value; -p 22 takes the next token. In a bundle (-tp 22) the last letter decides.
+    if (t.length === 2 && SSH_VALUE_OPTS.has(t[1]!)) i++;
+    else if (t.length > 2 && SSH_VALUE_OPTS.has(t[t.length - 1]!) && !SSH_VALUE_OPTS.has(t[1]!)) i++;
+  }
+  return null;
+}
+
+// Per-tab `user@host` of the daimonified SSH session, as typed (it's what reconnects).
+const sshTargetMap = new Map<string, string>();
+
 // Daimonify state: set once the remote shell accepts the bootstrap (markers flowing).
-function notifyDaimonify(tabId: string, active: boolean) {
+// `connect` is the ssh command and `remoteId` the remote's own `user@hostname`: the target
+// is the typed host, with the remote user when the command didn't name one.
+function notifyDaimonify(tabId: string, active: boolean, connect?: string, remoteId?: string) {
   inDaimonifiedMap.set(tabId, active);
+  const dest = active && connect ? sshDest(connect) : null;
+  if (dest) {
+    const user = remoteId?.split("@")[0];
+    sshTargetMap.set(tabId, dest.includes("@") || !user ? dest : `${user}@${dest}`);
+  } else sshTargetMap.delete(tabId);
 }
 
 // Standing exit listener: a daimonified SSH session ends when its PTY dies (remote `exit`).
@@ -606,7 +636,7 @@ export async function run(
       // prompt can arrive after ssh was typed, and must not pass for the remote's.
       if (isStreamingInteractive && ctx.ssh) {
         if (!isDaimonified(tabId)) {
-          notifyDaimonify(tabId, true);
+          notifyDaimonify(tabId, true, input, ctx.ssh);
           // The marker's exit code is the bootstrap's, not ssh's: the connection succeeded.
           finalCtx = { ...ctx, exitCode: 0 };
           cleanup({ keepSession: true });
@@ -699,8 +729,10 @@ export async function run(
         const shown = (o: Out[]): Out[] => wasCancelled
           ? [...o, ...cancelledOut]
           : (o.length ? o : (cmdCode !== 0 && !detectedTUI) ? [{ kind: "lines", lines: ["(no output)"], tone: "muted" }] : []);
+        const ssh = remoteRun ? sshTargetMap.get(tabId) : undefined;
         const finalBlock: Block = {
           ...pendingBlock, ms, code: wasCancelled ? 130 : cmdCode,
+          ...(ssh ? { ssh } : {}),
           ctx: state.ctx.name,
           out: shown(out),
           pending: false,

@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { Keys } from "./Kbd";
 import { shell } from "@/lib/daimon/rpc";
-import type { Block } from "@/lib/daimon/shell";
+import { sshDest, type Block } from "@/lib/daimon/shell";
 import { tildify } from "@/lib/daimon/world";
 
 function greeting(): string {
@@ -31,6 +31,18 @@ function greeting(): string {
 }
 
 const formatCwd = tildify;
+
+/** Where a command ran: `user@host:/path` over SSH (scp notation), else the local path. */
+function placeLabel(cwd: string, ssh?: string): string {
+  return ssh ? `${ssh}:${cwd}` : formatCwd(cwd);
+}
+
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** Reconnects and lands in `cwd`: the remote login shell starts there (and is daimonified as usual). */
+function sshCdCommand(ssh: string, cwd: string): string {
+  return `ssh -t ${shq(ssh)} ${shq(`cd ${shq(cwd)} && exec $SHELL -l`)}`;
+}
 
 // Split path into directory part + final segment for typographic emphasis
 function splitPath(formatted: string): { dir: string; name: string } {
@@ -64,9 +76,9 @@ function exitReason(code: number, cmd: string): string {
 }
 
 type GitInfo = { branch: string; dirty: boolean; ahead: number; behind: number } | null;
-type RecentDir = { cwd: string; ts: number; git: GitInfo };
-type FailedItem = { cmd: string; cwd: string; code: number; ts: number };
-type ResumeInfo = { cwd: string; cmd: string; ts: number; git: GitInfo };
+type RecentDir = { cwd: string; ssh?: string; ts: number; git: GitInfo };
+type FailedItem = { cmd: string; cwd: string; ssh?: string; code: number; ts: number };
+type ResumeInfo = { cwd: string; ssh?: string; cmd: string; ts: number; git: GitInfo };
 
 type Props = {
   blocks: Block[];
@@ -76,27 +88,14 @@ type Props = {
   onOpenPalette?: () => void;
 };
 
-/** Extract unique SSH hostnames from history, most-recent first, up to 5. */
+/** Unique SSH destinations (`user@host` as typed) from history, most-recent first, up to 5. */
 function sshHosts(history: string[]): string[] {
   const seen = new Set<string>();
-  const out: string[] = [];
-  for (let i = history.length - 1; i >= 0 && out.length < 5; i--) {
-    const cmd = history[i]!.trim();
-    if (!/^ssh\s+/.test(cmd)) continue;
-    const tokens = cmd.split(/\s+/).slice(1); // drop "ssh"
-    let host = "";
-    for (let j = 0; j < tokens.length; j++) {
-      const t = tokens[j]!;
-      if (t.startsWith("-")) { if (t === "-p" || t === "-i" || t === "-l") j++; continue; }
-      host = t;
-    }
-    if (!host) continue;
-    // strip user@ prefix
-    const at = host.indexOf("@");
-    if (at !== -1) host = host.slice(at + 1);
-    if (host && !seen.has(host)) { seen.add(host); out.push(host); }
+  for (let i = history.length - 1; i >= 0 && seen.size < 5; i--) {
+    const dest = sshDest(history[i]!);
+    if (dest) seen.add(dest);
   }
-  return out;
+  return [...seen];
 }
 
 const SHORTCUTS: { key: string; label: string; Icon: React.FC<{ className?: string }> }[] = [
@@ -111,6 +110,10 @@ const SHORTCUTS: { key: string; label: string; Icon: React.FC<{ className?: stri
 ];
 
 export function LandingPage({ blocks, history = [], onCd, onRun, onOpenPalette }: Props) {
+  /** Open a place: `cd` locally, or reconnect over SSH and start in that folder. */
+  const go = (cwd: string, ssh?: string) => (ssh && onRun ? onRun(sshCdCommand(ssh, cwd)) : onCd(cwd));
+  const goRef = useRef(go);
+  goRef.current = go;
   const [resume, setResume] = useState<ResumeInfo | null>(null);
   const [recentDirs, setRecentDirs] = useState<RecentDir[]>([]);
   const [failed, setFailed] = useState<FailedItem[]>([]);
@@ -124,30 +127,27 @@ export function LandingPage({ blocks, history = [], onCd, onRun, onOpenPalette }
       if (!rows.length) return;
 
       // Hero: derive from most recent block's cwd
-      const heroRow = blocks.length > 0
-        ? { cwd: "/" + blocks[blocks.length - 1]!.cwd.join("/"), ts: Date.now() }
-        : rows[0]!;
+      const last = blocks[blocks.length - 1];
+      const heroRow = last
+        ? { cwd: "/" + last.cwd.join("/"), ts: Date.now(), ssh: last.ssh }
+        : { cwd: rows[0]!.cwd, ts: rows[0]!.ts, ssh: rows[0]!.ssh || undefined };
+      const hero = { cwd: heroRow.cwd, ...(heroRow.ssh ? { ssh: heroRow.ssh } : {}), cmd: last ? last.input : rows[0]?.input ?? "", ts: heroRow.ts };
 
-      // Fetch git for hero cwd
-      shell.gitStatus(heroRow.cwd).then((s) => {
+      // Git for the hero cwd: local folders only (git runs here, not on the remote)
+      if (hero.ssh) setResume({ ...hero, git: null });
+      else shell.gitStatus(hero.cwd).then((s) => {
         const dirty = s.staged.length > 0 || s.unstaged.length > 0 || s.untracked.length > 0;
-        setResume({
-          cwd: heroRow.cwd,
-          cmd: blocks.length > 0 ? blocks[blocks.length - 1]!.input : rows[0]?.input ?? "",
-          ts: heroRow.ts,
-          git: { branch: s.branch, dirty, ahead: s.ahead, behind: s.behind },
-        });
-      }).catch(() => {
-        setResume({ cwd: heroRow.cwd, cmd: rows[0]?.input ?? "", ts: heroRow.ts, git: null });
-      });
+        setResume({ ...hero, git: { branch: s.branch, dirty, ahead: s.ahead, behind: s.behind } });
+      }).catch(() => setResume({ ...hero, git: null }));
 
       // Recent dirs
       const seenCwd = new Set<string>();
-      const dirs: { cwd: string; ts: number }[] = [];
+      const dirs: { cwd: string; ssh?: string; ts: number }[] = [];
       for (const r of rows) {
-        if (!seenCwd.has(r.cwd) && dirs.length < 6) {
-          seenCwd.add(r.cwd);
-          dirs.push({ cwd: r.cwd, ts: r.ts });
+        const key = placeLabel(r.cwd, r.ssh || undefined);
+        if (!seenCwd.has(key) && dirs.length < 6) {
+          seenCwd.add(key);
+          dirs.push({ cwd: r.cwd, ...(r.ssh ? { ssh: r.ssh } : {}), ts: r.ts });
         }
       }
 
@@ -157,12 +157,13 @@ export function LandingPage({ blocks, history = [], onCd, onRun, onOpenPalette }
         rows
           .filter(r => r.exit_code !== 0 && r.ts > cutoff)
           .slice(0, 6)
-          .map(r => ({ cmd: r.input, cwd: r.cwd, code: r.exit_code, ts: r.ts }))
+          .map(r => ({ cmd: r.input, cwd: r.cwd, ...(r.ssh ? { ssh: r.ssh } : {}), code: r.exit_code, ts: r.ts }))
       );
 
       // Git info for each recent dir
       Promise.all(
         dirs.map(async (d) => {
+          if (d.ssh) return { ...d, git: null };
           try {
             const s = await shell.gitStatus(d.cwd);
             const dirty = s.staged.length > 0 || s.unstaged.length > 0 || s.untracked.length > 0;
@@ -204,20 +205,22 @@ export function LandingPage({ blocks, history = [], onCd, onRun, onOpenPalette }
       if (!r) return;
       e.preventDefault();
       e.stopPropagation();
-      onCd(r.cwd);
+      goRef.current(r.cwd, r.ssh);
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [onCd]);
+  }, []);
 
-  const heroCwd = resume ? splitPath(formatCwd(resume.cwd)) : null;
+  const heroCwd = resume ? splitPath(placeLabel(resume.cwd, resume.ssh)) : null;
   const sshHostList = sshHosts(history);
   const recentDirList = (() => {
     const seen = new Set<string>();
-    const out: string[] = [];
+    const out: { cwd: string; ssh?: string; label: string }[] = [];
     for (let i = blocks.length - 1; i >= 0 && out.length < 5; i--) {
-      const cwd = "/" + blocks[i]!.cwd.join("/");
-      if (!seen.has(cwd)) { seen.add(cwd); out.push(cwd); }
+      const b = blocks[i]!;
+      const cwd = "/" + b.cwd.join("/");
+      const label = placeLabel(cwd, b.ssh);
+      if (!seen.has(label)) { seen.add(label); out.push({ cwd, ...(b.ssh ? { ssh: b.ssh } : {}), label }); }
     }
     return out;
   })();
@@ -268,7 +271,7 @@ export function LandingPage({ blocks, history = [], onCd, onRun, onOpenPalette }
         )}
 
         <button
-          onClick={() => { if (resume) onCd(resume.cwd); }}
+          onClick={() => { if (resume) go(resume.cwd, resume.ssh); }}
           disabled={!resume}
           className="flex items-center gap-2 border border-border bg-card veil-surface px-4 py-2.5 font-sans text-[13px] text-foreground transition-colors hover:border-signal/50 hover:bg-accent disabled:pointer-events-none disabled:opacity-40"
         >
@@ -311,13 +314,13 @@ export function LandingPage({ blocks, history = [], onCd, onRun, onOpenPalette }
                 <h2 className="mb-4 font-sans text-[15px] font-semibold text-foreground">Recent Directories</h2>
                 <ul className="space-y-0">
                   {recentDirList.map((dir) => (
-                    <li key={dir}>
+                    <li key={dir.label}>
                       <button
-                        onClick={() => onCd(dir)}
+                        onClick={() => go(dir.cwd, dir.ssh)}
                         className="group flex w-full items-center gap-3 py-3 border-b border-border/40 text-left transition-colors hover:bg-accent last:border-0 px-1"
                       >
-                        <FolderIcon className="size-3.5 shrink-0 text-muted-foreground/55" />
-                        <span className="font-mono text-[13px] text-foreground truncate">{formatCwd(dir)}</span>
+                        {dir.ssh ? <ServerIcon className="size-3.5 shrink-0 text-muted-foreground/55" /> : <FolderIcon className="size-3.5 shrink-0 text-muted-foreground/55" />}
+                        <span className="font-mono text-[13px] text-foreground truncate">{dir.label}</span>
                       </button>
                     </li>
                   ))}
@@ -338,14 +341,14 @@ export function LandingPage({ blocks, history = [], onCd, onRun, onOpenPalette }
             <p className="mb-6 font-sans text-[12px] text-muted-foreground/75">Press a number to open in a new session.</p>
             <ul className="space-y-0">
               {recentDirs.map((d, i) => (
-                <li key={d.cwd}>
+                <li key={placeLabel(d.cwd, d.ssh)}>
                   <button
-                    onClick={() => onCd(d.cwd)}
+                    onClick={() => go(d.cwd, d.ssh)}
                     className="group flex w-full items-center gap-3 py-3 border-b border-border/40 text-left transition-colors hover:bg-accent last:border-0 px-1"
                   >
                     <span className="w-5 h-5 shrink-0 flex items-center justify-center font-mono text-[10px] text-muted-foreground/65 border border-border/80 select-none">{i + 1}</span>
                     <span className="flex-1 min-w-0">
-                      <span className="block font-mono text-[13px] text-foreground truncate">{formatCwd(d.cwd)}</span>
+                      <span className="block font-mono text-[13px] text-foreground truncate">{placeLabel(d.cwd, d.ssh)}</span>
                       {d.git && (
                         <span className="flex items-center gap-1.5 mt-0.5">
                           <GitBranchIcon className="size-2.5 text-muted-foreground/55" />
@@ -371,13 +374,13 @@ export function LandingPage({ blocks, history = [], onCd, onRun, onOpenPalette }
               {failed.map((item, i) => (
                 <li key={i}>
                   <button
-                    onClick={() => onCd(item.cwd)}
+                    onClick={() => go(item.cwd, item.ssh)}
                     className="group flex w-full flex-col items-start py-3 border-b border-border/40 text-left transition-colors hover:bg-accent last:border-0 px-1"
                   >
                     <span className="font-mono text-[13px] text-foreground truncate w-full">{item.cmd}</span>
                     <span className="mt-0.5 font-sans text-[11px] text-alarm/85">
                       {exitReason(item.code, item.cmd)}{" "}
-                      <span className="text-muted-foreground/60">in {formatCwd(item.cwd)}, exit {item.code}</span>
+                      <span className="text-muted-foreground/60">in {placeLabel(item.cwd, item.ssh)}, exit {item.code}</span>
                     </span>
                   </button>
                 </li>
