@@ -20,6 +20,7 @@ import {
 import { Keys } from "./Kbd";
 import { shell } from "@/lib/daimon/rpc";
 import { usePresence } from "@/lib/daimon/presence";
+import { tildify } from "@/lib/daimon/world";
 
 type Command = { id: string; label: string; description?: string; run: () => void };
 
@@ -73,12 +74,7 @@ function formatTs(ms: number): string {
   return days === 1 ? "yesterday" : `${days}d ago`;
 }
 
-function formatCwd(cwd: string): string {
-  const home = typeof window !== "undefined" ? (window as any).__HOME__ ?? "" : "";
-  if (home && cwd === home) return "~";
-  if (home && cwd.startsWith(home + "/")) return "~" + cwd.slice(home.length);
-  return cwd;
-}
+const formatCwd = tildify;
 
 export function CommandPalette({ open, onClose, onRun, onCd, history, sessions, onSwitchSession, commands = [] }: Props) {
   const shown = usePresence(open);   // stays mounted while it animates out

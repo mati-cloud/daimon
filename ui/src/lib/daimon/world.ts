@@ -46,7 +46,12 @@ export function listDir(path: string[]): { name: string; node: Node }[] {
 }
 
 declare const __HOME__: string;
-const HOME_SEGS = __HOME__.replace(/^\//, "").split("/");
+// The app passes the real $HOME (?home=); __HOME__ is the build machine's, fine for dev.
+export const HOME = new URLSearchParams(location.search).get("home") || __HOME__;
+export const HOME_SEGS = HOME.replace(/^\//, "").split("/");
+
+export const tildify = (p: string): string =>
+  p === HOME ? "~" : p.startsWith(HOME + "/") ? "~" + p.slice(HOME.length) : p;
 
 export const displayPath = (path: string[]): string => {
   if (path.length >= HOME_SEGS.length && HOME_SEGS.every((seg, i) => seg === path[i])) {

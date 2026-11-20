@@ -10,7 +10,7 @@ import { HistoryPanel } from "@/components/daimon/HistoryPanel";
 import { run, sendRaw, resizePty, notifyAltScreen, onAltScreenChange, onTuiChange, STREAMING_INTERACTIVE_RE, isStreamingSession, isDaimonified, abandonRun, finishRun, setNotifConfig, type Block, type State } from "@/lib/daimon/shell";
 import { shell, onReconnect, type AttachInfo } from "@/lib/daimon/rpc";
 import { startBench } from "@/lib/daimon/bench";
-import { displayPath } from "@/lib/daimon/world";
+import { displayPath, HOME, HOME_SEGS } from "@/lib/daimon/world";
 import { LandingPage } from "@/components/daimon/LandingPage";
 import { CommandPalette } from "@/components/daimon/CommandPalette";
 import { GlobalSearch } from "@/components/daimon/GlobalSearch";
@@ -40,9 +40,7 @@ export const Route = createFileRoute("/")({
   component: Daimon,
 });
 
-declare const __HOME__: string;
-const HOME_PATH = __HOME__.replace(/^\//, "").split("/");
-const START: State = { cwd: HOME_PATH, ctx: { name: "" } };
+const START: State = { cwd: HOME_SEGS, ctx: { name: "" } };
 
 const now = () =>
   new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -1148,7 +1146,7 @@ function Daimon() {
                     onMouseEnter={() => { if (!pagerActive) { kbdDrivenRef.current = false; setHoveredBlockId(b.id); } if (!isFocused) setFocusedPane(splitSessionId && paneSessionId === splitSessionId ? "right" : "left"); }}
                     onMouseLeave={() => setHoveredBlockId(null)}
                   >
-                    <BlockView block={b} modeActive={effectiveHoveredBlockId === b.id && effectiveBlockModActive} onRerun={(cmd) => submitRef.current(cmd, paneSessionId)} isLast={i === pane.blocks.length - 1} currentCtx={pane.state.ctx.name} sessionId={pane.id} isTuiActive={tuiBlockIds.get(pane.id) === b.id} promptingForInput={panePrompting && !!b.pending} onSearch={(q) => { setGlobalSearchQuery(q); setGlobalSearchOpen(true); }} onPathClick={(path) => { const expanded = path.startsWith("~") ? __HOME__ + path.slice(1) : path; const hasExt = /\.[^/]+$/.test(expanded.split("/").pop() ?? ""); const dir = hasExt ? expanded.split("/").slice(0, -1).join("/") || "/" : expanded; submitRef.current("cd " + JSON.stringify(dir), paneSessionId); toast("cd " + dir, { duration: 2000 }); }} />
+                    <BlockView block={b} modeActive={effectiveHoveredBlockId === b.id && effectiveBlockModActive} onRerun={(cmd) => submitRef.current(cmd, paneSessionId)} isLast={i === pane.blocks.length - 1} currentCtx={pane.state.ctx.name} sessionId={pane.id} isTuiActive={tuiBlockIds.get(pane.id) === b.id} promptingForInput={panePrompting && !!b.pending} onSearch={(q) => { setGlobalSearchQuery(q); setGlobalSearchOpen(true); }} onPathClick={(path) => { const expanded = path.startsWith("~") ? HOME + path.slice(1) : path; const hasExt = /\.[^/]+$/.test(expanded.split("/").pop() ?? ""); const dir = hasExt ? expanded.split("/").slice(0, -1).join("/") || "/" : expanded; submitRef.current("cd " + JSON.stringify(dir), paneSessionId); toast("cd " + dir, { duration: 2000 }); }} />
                   </div>
                 ))}
               </div>

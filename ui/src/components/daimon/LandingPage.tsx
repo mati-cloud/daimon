@@ -20,8 +20,7 @@ import {
 import { Keys } from "./Kbd";
 import { shell } from "@/lib/daimon/rpc";
 import type { Block } from "@/lib/daimon/shell";
-
-declare const __HOME__: string;
+import { tildify } from "@/lib/daimon/world";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -31,12 +30,7 @@ function greeting(): string {
   return "Good evening.";
 }
 
-function formatCwd(raw: string): string {
-  const home = __HOME__;
-  if (raw === home) return "~";
-  if (raw.startsWith(home + "/")) return "~" + raw.slice(home.length);
-  return raw;
-}
+const formatCwd = tildify;
 
 // Split path into directory part + final segment for typographic emphasis
 function splitPath(formatted: string): { dir: string; name: string } {

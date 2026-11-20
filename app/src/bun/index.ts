@@ -16,6 +16,7 @@ import { setWindowIcon } from "./winIcon";
 import { startUpdater, type UpdateState } from "./updater";
 import { startLinuxResize, type ResizeEdge } from "./linuxX11";
 import { resolve } from "node:path";
+import { homedir } from "node:os";
 
 // ── pty-daemon ────────────────────────────────────────────────────────────────
 // Dev: dev.sh runs it. Prod: find the running daemon or start one (see daemon.ts).
@@ -45,6 +46,8 @@ const variableBlur = nativeTransparent && isWindows && !process.env.DAIMON_BACKD
 const query = [
   daemon && `daimon_token=${daemon.token}`,
   daemon && `daimon_port=${daemon.port}`,
+  // The UI's ~ shortening; its build-time HOME is the CI runner's.
+  `home=${encodeURIComponent(homedir())}`,
   nativeTransparent && "transparent=1",
   nativeTransparent && isWindows && (variableBlur ? "blur=variable" : "blur=steps"),
   nativeTransparent && isLinux && "blur=none",
