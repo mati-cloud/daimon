@@ -534,3 +534,7 @@ html.native-transparent body::after {
   from { opacity: max(var(--bg-alpha, 0.85), 0.5); }
   to   { opacity: calc(max(var(--bg-alpha, 0.85), 0.5) - 0.004); }
 }
+
+/* Magnified page: ⌘/Ctrl held → pan cursor (lib/daimon/magnify.ts). Beats any element's own cursor. */
+html.magnify-grab, html.magnify-grab * { cursor: grab !important; }
+html.magnify-grabbing, html.magnify-grabbing * { cursor: grabbing !important; user-select: none !important; }

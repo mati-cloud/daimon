@@ -54,9 +54,9 @@ import { loadPlugins } from "./lib/daimon/plugins";
 
 applyGlass(loadGlass());
 
-// Ctrl + wheel magnifies the window on Windows/Linux, like pinch-zoom on macOS (which the
-// native shell turns on in WKWebView itself).
-if (!/Mac/.test(navigator.platform)) installMagnify(document.getElementById("root")!);
+// Pinch / Ctrl + wheel magnifies the window (also over full-screen programs), and a
+// ⌘/Ctrl-drag pans it.
+installMagnify(document.getElementById("root")!);
 
 const router = getRouter();
 
