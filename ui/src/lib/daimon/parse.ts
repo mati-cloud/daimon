@@ -67,7 +67,7 @@ const ANSI = (s: string) =>
   // Only colour codes (most coloured output): the chain below would remove just those.
   : !NOT_ONLY_SGR_RE.test(s) ? s.replace(SGR_STRIP_RE, "")
   : applyBackspace(s)
-    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
     .replace(/\x1b[()][AB012B]/g, "")
     .replace(/\x1b[=>]/g, "")
@@ -249,7 +249,8 @@ function ansiHtmlChunk(raw: string, st: AnsiHtmlState): string {
     .replace(/\x1b[()][AB012B]/g, "")
     .replace(/\x1b[=>]/g, "")
     .replace(/\x1b[MDE]/g, "")
-    .replace(/\x1b\[[0-9;?]*[A-LN-Za-ln-z]/g, "")
+    // Every CSI but a plain colour code (ESC[…m without a private marker like ESC[>4m).
+    .replace(/\x1b\[(?![0-9;]*m)[0-?]*[ -/]*[@-~]/g, "")
     .replace(/\r/g, "")
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1a\x1c-\x1f]/g, "");
 
@@ -428,7 +429,7 @@ function stripPromptLines(text: string): string {
 // with \r, ESC[K and backspace. Replay those on a per-line cell grid so only the
 // final state of each line survives — and live updates overwrite instead of piling up.
 const LINE_CTRL_RE = /[\r\x08]|\x1b\[\d*[KGCD]/;
-const LINE_TOKEN_RE = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[^[\]]|[\r\x08]|[\s\S]/gu;
+const LINE_TOKEN_RE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[^[\]]|[\r\x08]|[\s\S]/gu;
 
 /** The attributes in effect at the end of the previous line; renderTermLine moves it on. */
 type SgrCarry = { sgr: Sgr };
@@ -441,8 +442,17 @@ type SgrCarry = { sgr: Sgr };
  */
 const FOREIGN_OSC_RE = /\x1b\](?!8;|1337;)[^\x07\x1b]*(?:\x07|\x1b\\|$)/g;
 
+/**
+ * CSI sequences nothing here renders — everything but colours (m) and the line edits replayed
+ * below (K G C D): terminal queries and mode switches programs print around a full-screen
+ * session, e.g. Claude Code's ESC[>0q ESC[c ESC[>4m ESC[<u. Full ECMA-48 shape: parameter
+ * bytes 0x30–0x3F (digits ; < = > ?), intermediates 0x20–0x2F, a final 0x40–0x7E.
+ */
+const FOREIGN_CSI_RE = /\x1b\[(?![0-9;]*[mKGCD])[0-?]*[ -/]*[@-~]/g;
+
 function renderTermLine(line: string, carry: SgrCarry): string {
   if (line.includes("\x1b]")) line = line.replace(FOREIGN_OSC_RE, "");
+  if (line.includes("\x1b[")) line = line.replace(FOREIGN_CSI_RE, "");
   if (!LINE_CTRL_RE.test(line)) {
     if (line.includes("\x1b[")) eachSgr(line, (_s, _e, params) => { carry.sgr = sgrApply(carry.sgr, params); });
     return line;
@@ -765,7 +775,7 @@ export function parseOutput(raw: string, input: string): Out[] {
 // that reaches across a newline — makes it defer to parseOutput().
 
 const OSC_RE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
-const CSI_RE = /\x1b\[[0-9;?]*[a-zA-Z]/g;
+const CSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 /** An OSC that isn't closed on its own line (as ANSI() reads it), so it may run on into the next one. */
 const hasOpenOsc = (l: string) =>
   l.includes("]") && l.includes("\x1b") &&
