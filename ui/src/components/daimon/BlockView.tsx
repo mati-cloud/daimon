@@ -1382,7 +1382,7 @@ function GitStatusSection({
         <span className="rounded-full bg-secondary/60 px-1.5 text-[10px] tabular-nums text-muted-foreground">{items.length}</span>
         <span className="ml-auto text-[11px] text-muted-foreground/0 transition-colors group-hover/sec:text-muted-foreground/45">{hint}</span>
       </header>
-      <div className="grid grid-cols-[5.5rem_minmax(0,1fr)_auto] items-baseline gap-x-3 font-mono text-[13px] leading-6">
+      <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-baseline gap-x-3 font-mono text-[13px] leading-6">
         {items.map((it) => (
           <React.Fragment key={(it.from ?? "") + it.path}>
             <span className={`text-[11px] ${it.labelCls}`}>{it.label}</span>
@@ -1394,10 +1394,8 @@ function GitStatusSection({
                 </>
               )}
               <GitPath path={it.path} dim={it.dim ?? false} onCd={onCd} />
-            </span>
-            <span className="flex justify-end gap-2 text-[11px] tabular-nums">
-              {!!it.add && <span className="text-signal/80">+{it.add}</span>}
-              {!!it.del && <span className="text-alarm/80">−{it.del}</span>}
+              {!!it.add && <span className="ml-1 shrink-0 text-[11px] tabular-nums text-signal/80">+{it.add}</span>}
+              {!!it.del && <span className="shrink-0 text-[11px] tabular-nums text-alarm/80">−{it.del}</span>}
             </span>
           </React.Fragment>
         ))}
