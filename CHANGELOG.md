@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.12.0](https://github.com/mati-cloud/daimon/compare/v0.11.0...v0.12.0) (2026-11-20)
+
+
+### Features
+
+* **ui:** show git status line counts next to file name ([a0b9527](https://github.com/mati-cloud/daimon/commit/a0b95272a5ec9eff53836853f727f4dbcecb9caf))
+
+
+### Bug Fixes
+
+* **notifications:** ask for permission on the first user gesture ([86a6d83](https://github.com/mati-cloud/daimon/commit/86a6d830507ef3c38671bfe795d6143dfa60d922))
+* **ui:** run multi-line input as one block per line ([a1a5c49](https://github.com/mati-cloud/daimon/commit/a1a5c497ad3e41ec2eeceed6b84282e806b48432))
+
 ## [0.11.0](https://github.com/mati-cloud/daimon/compare/v0.10.0...v0.11.0) (2026-11-20)
 
 
