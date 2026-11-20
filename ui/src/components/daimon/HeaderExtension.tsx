@@ -1,5 +1,20 @@
 import React from "react";
-import { useHeaderButtons, useStatusItems, reportPluginError, type UseStatusItem } from "@/lib/daimon/plugins";
+import { ServerIcon } from "lucide-react";
+import { useHeaderButtons, useStatusItems, useShellContext, reportPluginError, type UseStatusItem } from "@/lib/daimon/plugins";
+
+/** Built in (not a plugin, so it can't be missing or unapproved): where commands run when
+ *  the focused tab is in an SSH session. Gone as soon as the local prompt is back. */
+const useSshStatus: UseStatusItem = () => {
+  const { ssh } = useShellContext();
+  if (!ssh) return null;
+  const at = ssh.lastIndexOf("@");
+  return {
+    icon: <ServerIcon className="text-amber" />,
+    label: <>{ssh.slice(0, at)}<span className="mx-1 text-muted-foreground/50">@</span>{ssh.slice(at + 1)}</>,
+    color: "var(--amber)",
+    title: `Connected via SSH as ${ssh}: commands run on the remote host`,
+  };
+};
 
 /** Keeps a crashing plugin button from taking the header down with it. */
 class PluginBoundary extends React.Component<{ id: string; children: React.ReactNode }, { failed: boolean }> {
@@ -28,6 +43,7 @@ export function StatusItemSlot({ variant }: { variant: StatusVariant }) {
   const items = useStatusItems();
   return (
     <>
+      <StatusItemHost use={useSshStatus} variant={variant} />
       {items.map(({ id, use, serial }) => (
         <PluginBoundary key={`${id}:${serial}`} id={id}><StatusItemHost use={use} variant={variant} /></PluginBoundary>
       ))}

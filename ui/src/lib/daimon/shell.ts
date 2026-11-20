@@ -42,9 +42,13 @@ const INTERACTIVE_RE = /^\s*(scp|ipmitool|ipmi|kubectl\s+(exec|attach|debug)|oc\
 // Covers: cursor-up redraws, hide/show cursor (spinners/menus),
 // cursor-absolute-position (full-screen apps: k9s, lazygit, etc emit \x1b[H or \x1b[r;cH),
 // erase-display (\x1b[2J / \x1b[3J), enable mouse tracking (\x1b[?1000h).
+// Bracketed paste on (\x1b[?2004h): a line editor is waiting at a prompt inside the command:
+// a nested shell (bash/zsh/fish, also over SSH) or a readline REPL (python, psql, irb).
+// The outer shell turns it off before running a command and back on only after its own
+// prompt marker, so mid-command it can only come from a program wanting keystrokes.
 // Not erase-line (\x1b[2K): on its own that's a one-line progress redraw (vite, npm),
 // which normalizeTerminal replays in the block.
-const TUI_RE = /\x1b\[\d*A|\x1b\[\d*;\d*H|\x1b\[H\b|\x1b\[2J|\x1b\[3J|\x1b\[\?1000h|\x1b\[\?1049[lh]/;
+const TUI_RE = /\x1b\[\?2004h|\x1b\[\d*A|\x1b\[\d*;\d*H|\x1b\[H\b|\x1b\[2J|\x1b\[3J|\x1b\[\?1000h|\x1b\[\?1049[lh]/;
 
 // Terminal state changes that mean nothing in a text block: private mode set/reset,
 // cursor save/restore (ESC 7 / ESC 8) and scroll-region set/reset (CSI r). Full-screen
@@ -90,14 +94,19 @@ export function isStreamingSession(tabId: string) { return inStreamingSessionMap
 const inDaimonifiedMap = new Map<string, boolean>();
 export function isDaimonified(tabId: string) { return inDaimonifiedMap.get(tabId) ?? false; }
 
-// Base64 of shell-integration/daimonify.zsh — pure-zsh OSC 133 bootstrap pushed over SSH.
-// Regenerate on payload change: `base64 -i shell-integration/daimonify.zsh | tr -d '\n'`.
+// shell-integration/daimonify.sh without comments, gzipped, base64: bash/zsh OSC 133 bootstrap
+// pushed over SSH. Small on purpose: typed before the remote shell's line editor is up, the
+// line goes through the tty's cooked mode, which cuts lines at 4095 bytes (Linux) — a cut
+// line leaves bash waiting at its `>` continuation prompt.
+// Regenerate: sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' shell-integration/daimonify.sh | gzip -9n | base64 | tr -d '\n'
 const DAIMONIFY_PAYLOAD_B64 =
-  "IyBkYWltb24gcmVtb3RlIHdhcnBpZnkgcGF5bG9hZCDigJQgc291cmNlZCBpbnRvIGEgcmVtb3RlIHpzaCBvdmVyIFNTSC4KIyBQdXJlIHpzaCwgbm8gYmluYXJ5OiBlbWl0cyB0aGUgc2FtZSBPU0MgMTMzIG1hcmtlcnMgZGFpbW9uJ3MgbG9jYWwgaW50ZWdyYXRpb24gZW1pdHMsCiMgc28gdGhlIGRhZW1vbiBwYXJzZXMgcmVtb3RlIGNvbW1hbmQgYm91bmRhcmllcyBleGFjdGx5IGxpa2UgbG9jYWwgb25lcy4KIyBHaXQgaW5mbyB2aWEgYGdpdGAgc3VicHJvY2VzcyAobGliZ2l0MiB1bmF2YWlsYWJsZSByZW1vdGVseSk7IHNpbGVudCB3aGVuIGdpdCBhYnNlbnQuCgpfZGFpbW9uX3JlbW90ZV9wcmVjbWQoKSB7CiAgbG9jYWwgY29kZT0kPwogIGxvY2FsIHB3ZD0iJHtQV0R9IgogIGxvY2FsIGJyYW5jaD0iIiBkaXJ0eT1mYWxzZQogIGlmIGNvbW1hbmQgZ2l0IHJldi1wYXJzZSAtLWlzLWluc2lkZS13b3JrLXRyZWUgJj4vZGV2L251bGw7IHRoZW4KICAgIGJyYW5jaD0kKGNvbW1hbmQgZ2l0IHN5bWJvbGljLXJlZiAtLXNob3J0IEhFQUQgMj4vZGV2L251bGwgfHwgY29tbWFuZCBnaXQgcmV2LXBhcnNlIC0tc2hvcnQgSEVBRCAyPi9kZXYvbnVsbCkKICAgIGNvbW1hbmQgZ2l0IGRpZmYgLS1xdWlldCAmPi9kZXYvbnVsbCAmJiBjb21tYW5kIGdpdCBkaWZmIC0tY2FjaGVkIC0tcXVpZXQgJj4vZGV2L251bGwgfHwgZGlydHk9dHJ1ZQogIGZpCiAgIyBIYW5kLWJ1aWx0IEpTT04gKG5vIGpxKTsgZXNjYXBlIGJhY2tzbGFzaCB0aGVuIGRvdWJsZS1xdW90ZSBpbiBwd2QuCiAgbG9jYWwgZXNjPSIke3B3ZC8vXFwvXFxcXH0iOyBlc2M9IiR7ZXNjLy9cIi9cXFwifSIKICBsb2NhbCBqc29uPSJ7XCJwd2RcIjpcIiR7ZXNjfVwiLFwiZXhpdENvZGVcIjoke2NvZGV9IgogIGlmIFtbIC1uICIkYnJhbmNoIiBdXTsgdGhlbgogICAgbG9jYWwgYmVzYz0iJHticmFuY2gvL1xcL1xcXFx9IjsgYmVzYz0iJHtiZXNjLy9cIi9cXFwifSIKICAgIGpzb24rPSIsXCJnaXRCcmFuY2hcIjpcIiR7YmVzY31cIixcImdpdERpcnR5XCI6JHtkaXJ0eX0iCiAgZmkKICBqc29uKz0ifSIKICBwcmludGYgJ1xlXTEzMztBJXNcZVxcJyAiJGpzb24iCn0KCl9kYWltb25fcmVtb3RlX3ByZWV4ZWMoKSB7IHByaW50ZiAnXGVdMTMzO0NcZVxcJzsgfQoKcHJlY21kX2Z1bmN0aW9ucys9KF9kYWltb25fcmVtb3RlX3ByZWNtZCkKcHJlZXhlY19mdW5jdGlvbnMrPShfZGFpbW9uX3JlbW90ZV9wcmVleGVjKQoKIyBNaW5pbWFsIHByb21wdCDigJQgZGFpbW9uIHJlbmRlcnMgaXRzIG93biBjaHJvbWUuClBST01QVD0nICcKUlBST01QVD0nJwp1bnNldG9wdCBQUk9NUFRfQ1IgUFJPTVBUX1NQIDI+L2Rldi9udWxsIHx8IHRydWUK";
+  "H4sIAAAAAAACA5VVbW/TMBD+vl9xMmFtBVHbdeJDpwy6tTAktk4tLxJLVWWJSw2JU2xnL5T8d85xsiVNJqCKasd3z/nuec7OMvBYFPOloFGs6DLyxI92B7Z7AGHseyH4cUAdqw9U+g6xtpdfxt2u6+LjuimBa+Fxf+0QAgET6t5ZeaGkiGUrBEaRxwP4xhQIemNvPCEp2DaTNuOSBdS+jcUPWwlK4bgb0JsuT8IQDo73+0eg1pRjGCg2sNrlcPI+uo5D5tuCrjCiXMdCwdlkNEb0Y6Tfv5/MoRnRyXYsYwK20hv8TBhVu0nC/n6Tr+/5axo8CcKkDFNKJJqoFcO/nFsckFuiuSUpeVDgu4y5Q7Yu2dwGLhm6xjN1yUuX0DumTlEhXLe2WqoUF6Vc537LqrgsQBQx8lxdgc2BWIZgAotFnXWMYGYlyY+ajKWcIc/X2upRp4PknGSOeVIGZfJH21jTkeWfEZMFyVgx1VOuBKNSs2RmpV4IJdj90eZDVfYHVdbUC3SRB71er7R87Un66vAJjBJgB9ByeUt3w24poSwEMLnkdG4E42qFqN5gsOgPBkej52jCF9dtIcUaTfbSvR01Ntj5d9TXp60e4TSHH0G6l6v1C+qKxtxOK9rV7E6/vsoCLKrNkJyE7x4Z6q9j3OjTfDIjnTfW9mw6/3gxOp8MbTPHsZ1wL8JjxDtpplZT9HrrdbtXukkW3XSnA7df52fLz5PZ/P30YqeaWmzkzI+CjLJl/eIC67XmS+OM43KVcF+xmMsXTrsxVKfw1lL8xV27GP/L2fT88qPTAtRnVry0MlPCJVXxRuU+y9NZMZtflrnWDR2WWTgZ/TsN0ruhVRLwWGDtgqpEcLAelws+/o9HUoqAJ7548UREA6dfxCwqnJ6fjy7GDmlIklj6KOnvRsV3aA/T3NSYmLlIkJ12Gx55uXg7veot4BgOdaO2awbHQQveylVDHxFo6ECnUyIUs5/3nJZL89NG9VEFeIatEEeoHt6w3obKIUzmp2B8sqmboan5yjUQG9Dr5Fv+ATW/B4ErLBqFdR1Gswf3Kte15Wo35uY0H5XwNtBqyqgF48nJp3eZX3a56vr7uoHNbYvPHxnOL7MJCAAA";
 
-// Injected as one line, no temp files: decode the bootstrap and source it into the
-// remote zsh. Leading space keeps it out of remote history (HIST_IGNORE_SPACE).
-const DAIMONIFY_INJECT = ` printf %s ${DAIMONIFY_PAYLOAD_B64} | base64 -d | source /dev/stdin\n`;
+// Injected as one line, no temp files: decode the bootstrap and eval it in the remote
+// shell itself (`| source` would run in a subshell in bash). Leading space keeps it out
+// of remote history (HIST_IGNORE_SPACE / HISTCONTROL=ignorespace). The shell echoes
+// the line back; run() keeps that echo out of the block.
+const DAIMONIFY_INJECT = ` eval "$(printf %s ${DAIMONIFY_PAYLOAD_B64} | base64 -d | gzip -dc)"\n`;
 
 // Daimonify state: set once the remote shell accepts the bootstrap (markers flowing).
 function notifyDaimonify(tabId: string, active: boolean) {
@@ -442,14 +451,25 @@ export async function run(
   let daimonifyInjectTimer: ReturnType<typeof setTimeout> | null = null;
   let daimonifyRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let daimonifyInjected = false;
+  // From injection to the remote's first marker, output is the shell echoing the bootstrap
+  // line (a wall of base64): kept out of the block.
+  let daimonifyMuted = false;
   const injectDaimonify = () => {
     if (done || daimonifyInjected) return;
     daimonifyInjected = true;
+    daimonifyMuted = true;
     shell.write(tabId, DAIMONIFY_INJECT).catch(() => {});
-    // If no remote marker confirms within 1.5s, try once more, then give up (stays raw).
+    // No remote marker within 1.5s: try once more (sourcing twice is harmless).
     daimonifyRetryTimer = setTimeout(() => {
       if (done || isDaimonified(tabId)) return;
       shell.write(tabId, DAIMONIFY_INJECT).catch(() => {});
+      // Still nothing: not bash/zsh (or no base64) — stay a plain stream. Show output
+      // again, and ask for a fresh prompt in place of the hidden one.
+      daimonifyRetryTimer = setTimeout(() => {
+        if (done || isDaimonified(tabId)) return;
+        daimonifyMuted = false;
+        shell.write(tabId, "\n").catch(() => {});
+      }, 2500);
     }, 1500);
   };
   const armDaimonifyInject = () => {
@@ -520,6 +540,7 @@ export async function run(
       if (rawRun !== null) rawRun = rawRun.length + cleanData.length > RAW_KEEP ? null : rawRun + cleanData;
       // Streaming interactive (ssh etc): always pipe output to block, no TUI takeover
       if (isStreamingInteractive) {
+        if (daimonifyMuted) return;
         appendOutput(cleanData);
         // ssh: once the remote shell settles (quiet period), push the daimonify bootstrap.
         if (!isDaimonified(tabId)) armDaimonifyInject();
@@ -562,14 +583,19 @@ export async function run(
       // marker. The live SSH channel is the PTY itself; each later remote command gets
       // its own run()/block. We must resolve here because the next run() replaces the
       // module-level exit/output subscriptions, so this promise would otherwise hang.
-      if (isStreamingInteractive) {
+      // Only the remote payload's marker counts (it carries `ssh`): a fresh tab's startup
+      // prompt can arrive after ssh was typed, and must not pass for the remote's.
+      if (isStreamingInteractive && ctx.ssh) {
         if (!isDaimonified(tabId)) {
           notifyDaimonify(tabId, true);
-          finalCtx = ctx;
+          // The marker's exit code is the bootstrap's, not ssh's: the connection succeeded.
+          finalCtx = { ...ctx, exitCode: 0 };
           cleanup({ keepSession: true });
         }
         return;
       }
+      // A local marker for ssh: before it ran (startup prompt) is ignored below; after
+      // (commandStarted) ssh has ended without daimonifying, so it finishes like any command.
       if (!commandStarted) return; // ignore startup precmd prompt — wait for real command
       finalCtx = ctx;
       // Stop buffering immediately — the prompt line arrives after context and

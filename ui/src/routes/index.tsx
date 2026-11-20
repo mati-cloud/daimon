@@ -1006,9 +1006,9 @@ function Daimon() {
     }
 
     // Any pending command (e.g. Y/n prompt, password, script input) — forward as stdin.
-    // Skip when daimonified: the ssh connection block stays pending for the session's life,
-    // so remote commands must go through run() (block path), not raw stdin.
-    if (sess.blocks.some((b) => b.pending) && !isDaimonified(sessionId)) {
+    // Over SSH too: the connection block finishes once the session is daimonified, so a
+    // pending block there is a remote command still running, and input is for it.
+    if (sess.blocks.some((b) => b.pending)) {
       // Control characters (e.g. \x03 SIGINT) go raw without newline
       const isCtrl = cmd.length === 1 && cmd.charCodeAt(0) < 32;
       sendRaw(sessionId, isCtrl ? cmd : cmd + "\n");

@@ -49,6 +49,8 @@ export type ShellContext = {
   gitAdded?: number;
   gitRemoved?: number;
   exitCode?: number;
+  /** `user@host` while the tab is in a daimonified SSH session (set by the remote payload). */
+  ssh?: string;
   cmdDuration?: number;
   cmdTimestamp?: number;
   promptLen?: number;
