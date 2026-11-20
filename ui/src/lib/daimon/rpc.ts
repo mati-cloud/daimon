@@ -263,8 +263,9 @@ export const shell = {
   completePath:        () => Promise.resolve(""),
   listPathCompletions: (prefix: string, cwd: string, kind: string) =>
     request<{ value: string; isDir: boolean }[]>({ type: "listPaths", prefix, cwd, kind }),
-  completeNative:      (buffer: string, cwd: string) =>
-    request<{ text: string; description?: string; kind: string }[]>({ type: "complete", buffer, cwd }),
+  /** `tabId`: the session typed in — an ssh session completes paths from its remote folder. */
+  completeNative:      (buffer: string, cwd: string, tabId?: string) =>
+    request<{ text: string; description?: string; kind: string }[]>({ type: "complete", buffer, cwd, ...(tabId ? { tab_id: tabId } : {}) }),
   getCompletions:      () => Promise.resolve([] as { value: string; description?: string }[]),
   getFlagType:         () => Promise.resolve("unknown" as const),
   getBuiltinPathKind:  () => Promise.resolve(null as "file" | "dir" | "path" | null),

@@ -25,8 +25,18 @@ pub enum SuggestionKind {
     History,
 }
 
+/// A folder's entries as another machine reported them (name, is a folder) — an ssh
+/// session's remote cwd, which this machine's disk doesn't have.
+pub type Listing = [(String, bool)];
+
 /// Main entry point — given a buffer and cwd, return completions.
 pub fn complete(buffer: &str, cwd: &str) -> Vec<Suggestion> {
+    complete_with(buffer, cwd, None)
+}
+
+/// `complete`, for a shell on another machine when `remote` is given: paths come from that
+/// listing of `cwd` (only `cwd` itself is known), and nothing reads this machine's disk or git.
+pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<Suggestion> {
     let cursor = buffer.len();
     let (words, idx, partial) = tokenize(buffer, cursor);
 
@@ -37,12 +47,12 @@ pub fn complete(buffer: &str, cwd: &str) -> Vec<Suggestion> {
     let cmd = if idx == 0 { &partial } else { &words[0] };
     if idx == 0 {
         // Completing the command name itself — no spec needed
-        return filesystem_completions(&partial, cwd, true);
+        return filesystem_completions(&partial, cwd, true, remote);
     }
 
     let Some(spec) = global().get(cmd) else {
         // No spec — fall back to filesystem
-        return filesystem_completions(&partial, cwd, false);
+        return filesystem_completions(&partial, cwd, false, remote);
     };
 
     // Walk subcommand tree
@@ -96,17 +106,19 @@ pub fn complete(buffer: &str, cwd: &str) -> Vec<Suggestion> {
         .or_else(|| args.last().filter(|a| matches!(a.kind, ArgKind::Rest)));
 
     if let Some(arg) = arg {
-        return complete_arg(&arg.kind, &partial, cwd);
+        return complete_arg(&arg.kind, &partial, cwd, remote);
     }
 
     // Last resort: filesystem
-    filesystem_completions(&partial, cwd, false)
+    filesystem_completions(&partial, cwd, false, remote)
 }
 
-fn complete_arg(kind: &ArgKind, partial: &str, cwd: &str) -> Vec<Suggestion> {
+fn complete_arg(kind: &ArgKind, partial: &str, cwd: &str, remote: Option<&Listing>) -> Vec<Suggestion> {
     match kind {
-        ArgKind::File | ArgKind::Rest => filesystem_completions(partial, cwd, false),
-        ArgKind::Dir                  => filesystem_completions(partial, cwd, true),
+        ArgKind::File | ArgKind::Rest => filesystem_completions(partial, cwd, false, remote),
+        ArgKind::Dir                  => filesystem_completions(partial, cwd, true, remote),
+        // The repository is on the other machine: this one's git would answer for the wrong one.
+        ArgKind::GitBranch | ArgKind::GitTag | ArgKind::GitRemote | ArgKind::GitDirty if remote.is_some() => vec![],
         ArgKind::Choice { choices }   => choices.iter()
             .filter(|c| c.starts_with(partial))
             .map(|c| Suggestion { text: c.clone(), description: None, kind: SuggestionKind::Choice })
@@ -119,45 +131,122 @@ fn complete_arg(kind: &ArgKind, partial: &str, cwd: &str) -> Vec<Suggestion> {
     }
 }
 
-fn filesystem_completions(partial: &str, cwd: &str, dirs_only: bool) -> Vec<Suggestion> {
-    let (dir, prefix) = if partial.contains('/') {
-        let p = Path::new(partial);
-        let dir = if partial.ends_with('/') {
-            p.to_path_buf()
-        } else {
-            p.parent().unwrap_or(Path::new(".")).to_path_buf()
-        };
-        let prefix = if partial.ends_with('/') { "" } else { p.file_name().and_then(|n| n.to_str()).unwrap_or("") };
-        (dir, prefix.to_string())
-    } else {
-        (Path::new(cwd).to_path_buf(), partial.to_string())
-    };
+/// `~` / `~/…` → the home directory, for reading the disk; suggestions keep what was typed.
+fn expand_tilde(path: &str) -> std::path::PathBuf {
+    let home = || std::env::var_os("HOME").map(std::path::PathBuf::from);
+    match path.strip_prefix('~') {
+        Some("") => home().unwrap_or_else(|| path.into()),
+        Some(rest) if rest.starts_with('/') => home().map_or_else(|| path.into(), |h| h.join(&rest[1..])),
+        _ => path.into(),
+    }
+}
 
-    let base = if dir.is_absolute() { dir.clone() } else { Path::new(cwd).join(&dir) };
+/// Files and folders matching the path being typed. The typed path is split into the
+/// folder to list (everything up to the last `/`, `~` expanded, relative to `cwd`) and
+/// the name prefix after it; `foo/` lists inside `foo`. Folders end in `/` (symlinks to
+/// folders too), so accepting one keeps completing inside it. Hidden entries are listed
+/// too, after the others.
+fn filesystem_completions(partial: &str, cwd: &str, dirs_only: bool, remote: Option<&Listing>) -> Vec<Suggestion> {
+    let (typed_dir, prefix) = match partial.rfind('/') {
+        Some(i) => (&partial[..=i], &partial[i + 1..]),
+        // `~` alone: complete it to the home folder.
+        None if partial == "~" => ("", "~"),
+        None => ("", partial),
+    };
+    if prefix == "~" && typed_dir.is_empty() {
+        return vec![Suggestion { text: "~/".into(), description: None, kind: SuggestionKind::Dir }];
+    }
+    if let Some(entries) = remote {
+        // Only the remote cwd is known; a path into another folder has nothing to offer.
+        if !typed_dir.is_empty() {
+            return vec![];
+        }
+        let out = entries
+            .iter()
+            .filter(|(name, is_dir)| name.starts_with(prefix) && (*is_dir || !dirs_only))
+            .map(|(name, is_dir)| (*is_dir, name.clone()))
+            .collect();
+        return ranked(out, typed_dir);
+    }
+    let dir = expand_tilde(typed_dir);
+    let base = if typed_dir.is_empty() { Path::new(cwd).to_path_buf() } else if dir.is_absolute() { dir } else { Path::new(cwd).join(dir) };
+    if !base.is_dir() {
+        return vec![];
+    }
     let Ok(entries) = std::fs::read_dir(&base) else { return vec![] };
 
-    entries.flatten()
+    let out: Vec<(bool, String)> = entries
+        .flatten()
         .filter_map(|e| {
             let name = e.file_name().into_string().ok()?;
-            if !name.starts_with(&prefix) { return None; }
-            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            if dirs_only && !is_dir { return None; }
-            let text = if partial.contains('/') {
-                format!("{}{}", if partial.ends_with('/') { partial.to_string() } else {
-                    format!("{}/", partial.rsplit_once('/').map(|(p,_)| p).unwrap_or(""))
-                }, name)
-            } else {
-                name.clone()
-            };
-            let display = if is_dir { format!("{}/", text) } else { text };
-            Some(Suggestion {
-                text: display,
-                description: None,
-                kind: if is_dir { SuggestionKind::Dir } else { SuggestionKind::File },
-            })
+            if !name.starts_with(prefix) {
+                return None;
+            }
+            // metadata() follows symlinks: a link to a folder completes like a folder.
+            let is_dir = std::fs::metadata(e.path()).map(|m| m.is_dir()).unwrap_or(false);
+            if dirs_only && !is_dir {
+                return None;
+            }
+            Some((is_dir, name))
         })
+        .collect();
+    ranked(out, typed_dir)
+}
+
+/// Visible entries first, then hidden ones, each by name; folders end in `/`.
+fn ranked(mut out: Vec<(bool, String)>, typed_dir: &str) -> Vec<Suggestion> {
+    out.sort_by(|a, b| (a.1.starts_with('.'), &a.1).cmp(&(b.1.starts_with('.'), &b.1)));
+    out.into_iter()
         .take(50)
+        .map(|(is_dir, name)| Suggestion {
+            text: format!("{typed_dir}{name}{}", if is_dir { "/" } else { "" }),
+            description: None,
+            kind: if is_dir { SuggestionKind::Dir } else { SuggestionKind::File },
+        })
         .collect()
+}
+
+#[cfg(test)]
+mod fs_tests {
+    use super::*;
+
+    fn texts(partial: &str, cwd: &str) -> Vec<String> {
+        filesystem_completions(partial, cwd, false, None).into_iter().map(|s| s.text).collect()
+    }
+
+    #[test]
+    fn completes_from_a_remote_listing_only() {
+        let remote = vec![("gitlab.mati.cloud".to_string(), true), ("notes.txt".to_string(), false), (".env".to_string(), false)];
+        let texts = |b: &str| complete_with(b, "/srv", Some(&remote)).into_iter().map(|s| s.text).collect::<Vec<_>>();
+        assert_eq!(texts("cd gi"), ["gitlab.mati.cloud/"]);
+        assert_eq!(texts("cat "), ["gitlab.mati.cloud/", "notes.txt", ".env"]);
+        // Only the remote cwd is known: nothing from this machine's disk.
+        assert!(texts("cat /etc/").is_empty());
+    }
+
+    #[test]
+    fn completes_relative_absolute_and_home_paths() {
+        let root = std::env::temp_dir().join(format!("daimon-complete-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("sub/inner")).unwrap();
+        std::fs::write(root.join("sub/file.txt"), "").unwrap();
+        std::fs::write(root.join("sub/.hidden"), "").unwrap();
+        let cwd = root.to_str().unwrap();
+
+        assert_eq!(texts("sub/", cwd), ["sub/file.txt", "sub/inner/", "sub/.hidden"]);
+        assert_eq!(texts("sub/i", cwd), ["sub/inner/"]);
+        assert_eq!(texts("sub/.h", cwd), ["sub/.hidden"]);
+        assert_eq!(texts("su", cwd), ["sub/"]);
+        assert_eq!(texts(&format!("{cwd}/sub/f"), "/"), [format!("{cwd}/sub/file.txt")]);
+        assert!(texts("missing/", cwd).is_empty());
+        assert!(texts("sub/file.txt/", cwd).is_empty()); // a file isn't listed into
+
+        // ~ expands for reading but stays as typed in the suggestion.
+        std::env::set_var("HOME", &root);
+        assert_eq!(texts("~/sub/.h", "/"), ["~/sub/.hidden"]);
+        assert_eq!(texts("~/s", "/"), ["~/sub/"]);
+        assert_eq!(texts("~", "/"), ["~/"]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 }
 
 enum GitRefKind { Branch, Tag, Remote }

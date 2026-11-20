@@ -269,10 +269,14 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
                                 let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
                             });
                         }
-                        Ok(SessionCommand::Complete { req_id, buffer, cwd }) => {
+                        Ok(SessionCommand::Complete { req_id, buffer, cwd, tab_id }) => {
                             let tx = client_tx.clone();
+                            let remote = match &tab_id {
+                                Some(t) => mgr.lock().await.remote_listing(t, &cwd),
+                                None => None,
+                            };
                             tokio::task::spawn_blocking(move || {
-                                let data = crate::complete::complete(&buffer, &cwd);
+                                let data = crate::complete::complete(&buffer, &cwd, remote.as_deref());
                                 let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
                             });
                         }

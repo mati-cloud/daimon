@@ -62,7 +62,8 @@ pub enum SessionCommand {
     /// List filesystem paths for autocomplete.
     ListPaths { req_id: String, prefix: String, cwd: String, kind: String },
     /// Full completion: specs + filesystem + manpages via gc-suggest.
-    Complete { req_id: String, buffer: String, cwd: String },
+    /// `tab_id`: the session typed in — an ssh session completes from its remote folder.
+    Complete { req_id: String, buffer: String, cwd: String, #[serde(default)] tab_id: Option<String> },
     /// Get files changed in a commit + commit body.
     CommitDetail { req_id: String, hash: String, cwd: String },
     /// Get unified diff for a single file in a commit.
@@ -477,6 +478,29 @@ impl Session {
     /// Snapshot for a reconnecting UI. A full-screen program can't be replayed from a
     /// capped byte tail, so it only gets its modes restored; the UI then asks for a
     /// `redraw` once its terminal is ready to receive one.
+    /// An ssh session's remote folder, as its last prompt listed it (shell-integration/
+    /// daimonify.sh: "ls", base64 lines, folders ending in `/`) — when that folder is `cwd`.
+    /// None for a local shell: completion reads this machine's disk then.
+    pub fn remote_listing(&self, cwd: &str) -> Option<Vec<(String, bool)>> {
+        use base64::{engine::general_purpose::STANDARD as B64, Engine};
+        let ctx: serde_json::Value = serde_json::from_str(self.state.lock().unwrap().context.as_deref()?).ok()?;
+        ctx.get("ssh")?;
+        if ctx.get("pwd")?.as_str()? != cwd {
+            return None;
+        }
+        let bytes = B64.decode(ctx.get("ls")?.as_str()?).ok()?;
+        Some(
+            String::from_utf8_lossy(&bytes)
+                .lines()
+                .filter(|l| !l.is_empty() && *l != "./" && *l != "../")
+                .map(|l| match l.strip_suffix('/') {
+                    Some(dir) => (dir.to_string(), true),
+                    None => (l.to_string(), false),
+                })
+                .collect(),
+        )
+    }
+
     pub fn attach(&self) -> AttachInfo {
         let s = self.state.lock().unwrap();
         AttachInfo {
@@ -560,6 +584,10 @@ impl SessionManager {
 
     pub fn redraw(&self, tab_id: &str) {
         if let Some(s) = self.sessions.get(tab_id) { s.redraw(); }
+    }
+
+    pub fn remote_listing(&self, tab_id: &str, cwd: &str) -> Option<Vec<(String, bool)>> {
+        self.sessions.get(tab_id)?.remote_listing(cwd)
     }
 
     pub fn len(&self) -> usize {

@@ -92,7 +92,7 @@ export function Composer({
     // stdin mode: no completions (and never ship a typed password to the completer)
     if (!value.trim() || disabled) { completePromise.current = null; return; }
     const cwdStr = "/" + cwd.join("/");
-    const p = completeNative(value, cwdStr, history, historyTs);
+    const p = completeNative(value, cwdStr, history, historyTs, sessionId || undefined);
     completePromise.current = p;
     completeDebounce.current = setTimeout(async () => {
       const result = await p;

@@ -1,4 +1,4 @@
-use daimon_complete::complete as spec_complete;
+use daimon_complete::{complete_with, Listing};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -9,8 +9,9 @@ pub struct CompletionItem {
     pub kind: String,
 }
 
-pub fn complete(buffer: &str, cwd: &str) -> Value {
-    let suggestions = spec_complete(buffer, cwd);
+/// `remote`: an ssh session's remote folder listing (session.rs), used instead of this disk.
+pub fn complete(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Value {
+    let suggestions = complete_with(buffer, cwd, remote);
     let items: Vec<CompletionItem> = suggestions
         .into_iter()
         .map(|s| CompletionItem {

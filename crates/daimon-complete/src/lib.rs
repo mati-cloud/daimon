@@ -3,4 +3,4 @@ pub mod registry;
 pub mod spec;
 pub mod tokenize;
 
-pub use engine::{complete, Suggestion, SuggestionKind};
+pub use engine::{complete, complete_with, Listing, Suggestion, SuggestionKind};

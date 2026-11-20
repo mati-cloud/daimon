@@ -28,11 +28,12 @@ export async function completeNative(
   cwd: string,
   history: string[] = [],
   historyTs: number[] = [],
+  tabId?: string,
 ): Promise<{ items: Suggestion[]; token: string }> {
   void history; void historyTs; // history ghost is handled in Composer, not the dropdown
   const token = currentToken(input);
 
-  const raw = await shell.completeNative(input, cwd).catch(() => []);
+  const raw = await shell.completeNative(input, cwd, tabId).catch(() => []);
   const items: Suggestion[] = raw.map((s, i) => ({
     value: s.text,
     label: s.text,
