@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.11.0](https://github.com/mati-cloud/daimon/compare/v0.10.0...v0.11.0) (2026-11-20)
+
+
+### Features
+
+* **app:** close a session when its shell exits ([509337a](https://github.com/mati-cloud/daimon/commit/509337a00a830a50942fc5fcb17351d0870a57ab))
+* **app:** set a minimum window size ([6435dc4](https://github.com/mati-cloud/daimon/commit/6435dc49040ee578d3ece5279f8bc17fc091b629))
+* **complete:** complete ~, hidden and remote ssh paths ([d893fb4](https://github.com/mati-cloud/daimon/commit/d893fb4656a5436b4052b3f8b85bafe12b55cd83))
+* **composer:** shell-like path completion and Home/End keys ([fb228b7](https://github.com/mati-cloud/daimon/commit/fb228b7a955e8cd09f46de5367b897f8226de849))
+* **landing:** show and reopen SSH places as user@host:/path ([8c24a0e](https://github.com/mati-cloud/daimon/commit/8c24a0edcb47541150b6808c06373a6715683ab4))
+* **magnify:** pinch zoom and modifier-drag pan on all platforms ([bdbb8a7](https://github.com/mati-cloud/daimon/commit/bdbb8a7710e29375ee936616d69789f4ab956a87))
+* **plugins:** require admin approval before loading plugins ([6028bfc](https://github.com/mati-cloud/daimon/commit/6028bfc8d3a3a1032e2dd83f803f664e1c0b3fbe))
+* **security:** restrict daemon websocket to app origin and add CSP ([64de87f](https://github.com/mati-cloud/daimon/commit/64de87f01c0967a6e5f850fd5bdd0d8a38cd3482))
+* **ssh:** daimonify bash and zsh remotes and show ssh status ([a0e2208](https://github.com/mati-cloud/daimon/commit/a0e22083857bba672354ead363206aaa3992c4f0))
+* **tui:** route keys, clipboard, title and bell through full-screen programs ([e324673](https://github.com/mati-cloud/daimon/commit/e324673b767e19bc9d30d4c6b14e9c895c6498fa))
+* **tui:** ship Noto symbol, math and emoji fallback fonts ([9a98fb0](https://github.com/mati-cloud/daimon/commit/9a98fb01c5581d40cb3f0fa2a922b576f208a610))
+* **ui:** make the sidebar resizable ([a2eb376](https://github.com/mati-cloud/daimon/commit/a2eb3765bb9b7650c294eff66fcfb32e0d57272c))
+* **ui:** theme toasts to match the app ([dc7b83c](https://github.com/mati-cloud/daimon/commit/dc7b83c97d29fa2847689ac6d36a97b89a5fa2f3))
+
+
+### Bug Fixes
+
+* **daemon:** drop shell output printed after the prompt mark ([01460c4](https://github.com/mati-cloud/daimon/commit/01460c497b533f13fc6e383a8451a4fc0a10c666))
+* **daemon:** restrict daemon info folder permissions ([6809c98](https://github.com/mati-cloud/daimon/commit/6809c98632b246cd31bd20c1ac16dba05ea3f2c3))
+* **parse:** strip every CSI sequence from block output ([910c340](https://github.com/mati-cloud/daimon/commit/910c340fcb6192f05844417334d4cab5978bd027))
+* **plugins:** load plugins from a pre-approval daemon instead of crashing ([ed704b7](https://github.com/mati-cloud/daimon/commit/ed704b7bdfa262871fd1d4c15fff5ad1c719dcd8))
+* **security:** harden daemon, link previews, history and logs ([30009fa](https://github.com/mati-cloud/daimon/commit/30009faad1757f729dbea603cf848673f11e1811))
+* **security:** proxy remote images, prune hourly, guard deceptive links ([8351b37](https://github.com/mati-cloud/daimon/commit/8351b3755d103a930978c27e75d971b5fee88f37))
+* **ssh:** wait for a raw tty before daimonifying and leave ssh mode on exit ([1f8690e](https://github.com/mati-cloud/daimon/commit/1f8690e077873257d8200b09fb01cfb12978e362))
+* **ui:** use the runtime home folder for ~ paths ([9dc141b](https://github.com/mati-cloud/daimon/commit/9dc141b062b8f3ad24e51c010069cc51a0d223b7))
+
 ## [0.10.0](https://github.com/mati-cloud/daimon/compare/v0.9.0...v0.10.0) (2026-11-19)
 
 
