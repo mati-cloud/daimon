@@ -391,6 +391,12 @@ impl Session {
                         let alt_exit = raw.contains("\x1b[?1049l");
                         let prompt = is_prompt_marker(&raw);
                         let cmd_start = is_command_start_marker(&raw);
+                        // What follows the prompt mark is the shell's prompt, not output: e.g.
+                        // zsh's PROMPT_SP "%" mark, which themes like Powerlevel10k turn back on.
+                        let raw = match prompt_mark_end(&raw) {
+                            Some(end) => raw[..end].to_string(),
+                            None => raw,
+                        };
 
                         // Strip PTY mode sequences + OSC 133 markers (already detected above).
                         // OSC 8 hyperlinks pass through: xterm and the block renderer both handle them.
@@ -508,6 +514,14 @@ fn extract_context_json(data: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
+/// Byte offset just past daimon's OSC 133;A mark (BEL or ESC \ terminated).
+fn prompt_mark_end(data: &str) -> Option<usize> {
+    let start = data.find(shell_parser::PROMPT_MARKER)? + shell_parser::PROMPT_MARKER.len();
+    let term = start + data[start..].find(['\x07', '\x1b'])?;
+    let len = if data[term..].starts_with("\x1b\\") { 2 } else { 1 };
+    Some(term + len)
+}
+
 /// Manager: owns all sessions for all tabs.
 /// Keyed by tab_id — no session can touch another session's PTY.
 pub struct SessionManager {
@@ -570,6 +584,15 @@ impl SessionManager {
 mod tests {
     use super::*;
     use tokio::sync::mpsc;
+
+    #[test]
+    fn prompt_mark_end_drops_prompt_sp_mark() {
+        let s = "out\n\x1b]133;A{\"pwd\":\"/\"}\x1b\\%                 \r \r";
+        assert_eq!(&s[..prompt_mark_end(s).unwrap()], "out\n\x1b]133;A{\"pwd\":\"/\"}\x1b\\");
+        let bel = "\x1b]133;A{}\x07%";
+        assert_eq!(&bel[..prompt_mark_end(bel).unwrap()], "\x1b]133;A{}\x07");
+        assert_eq!(prompt_mark_end("no mark"), None);
+    }
 
     /// Session spawns, receives output, exits cleanly.
     #[tokio::test]
