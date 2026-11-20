@@ -27,6 +27,12 @@ pub struct BlockRow {
     pub output_json: String,
 }
 
+const BLOCK_RETENTION_DAYS: i64 = 30;
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+
 fn db_path() -> PathBuf {
     let base = dirs::data_local_dir()
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".local/share"));
@@ -37,8 +43,16 @@ impl Store {
     pub fn open() -> Result<Self> {
         let path = db_path();
         std::fs::create_dir_all(path.parent().unwrap())?;
+        // History and block output can hold secrets: owner only (on Linux this folder isn't
+        // the token's state folder, so nothing else locks it down).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path.parent().unwrap(), std::fs::Permissions::from_mode(0o700))?;
+        }
         let conn = Connection::open(&path)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        // secure_delete: deleted history/output is zeroed on disk, not left in free pages.
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;")?;
         conn.execute_batch("
             CREATE TABLE IF NOT EXISTS history (
                 id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,6 +112,10 @@ impl Store {
             SELECT rowid, id, input, cwd, ts, exit_code FROM blocks
             WHERE rowid NOT IN (SELECT rowid FROM blocks_fts);
         ")?;
+        // Saved output can hold secrets (`cat .env`, `kubectl get secret`): keep it for
+        // BLOCK_RETENTION_DAYS, not forever. Command history is kept, like a shell's.
+        let cutoff = now_ms() - BLOCK_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+        conn.execute("DELETE FROM blocks WHERE ts < ?1", params![cutoff])?;
         let store = Store(Arc::new(Mutex::new(conn)));
         store.import_zsh_history()?;
         Ok(store)

@@ -8,6 +8,7 @@
 // isn't available or its context is lost. All behind one small interface, so BlockView
 // doesn't care which one it got.
 
+import { toast } from "sonner";
 import { Wraith } from "wraithterm";
 import { Terminal as XtermTerminal } from "wraithterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -70,6 +71,9 @@ export async function mountTui(el: HTMLElement, opts: TuiOptions): Promise<TuiTe
  *  output, not during a click or key press, so the page may not write the clipboard itself:
  *  the native host does (app/src/bun/index.ts); a plain browser tries anyway. */
 export function writeClipboard(text: string) {
+  // Never silent: a program (or an ssh remote) could otherwise swap in a command for you to paste.
+  const preview = text.length > 60 ? text.slice(0, 60) + "…" : text;
+  toast(`Program copied ${text.length} chars`, { description: preview.replace(/\s+/g, " "), duration: 2500, id: "osc52" });
   const host = (window as { __electrobunSendToHost?: (m: unknown) => void }).__electrobunSendToHost;
   if (host) host({ type: "clipboard", text });
   else navigator.clipboard.writeText(text).catch((err) => console.warn("[tui] clipboard write failed:", err));

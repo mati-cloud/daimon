@@ -32,3 +32,5 @@ preexec_functions+=(_daimon_preexec)
 PROMPT=' '
 RPROMPT=''
 unsetopt PROMPT_CR PROMPT_SP 2>/dev/null || true
+# A command typed with a leading space stays out of history (daimon's store skips it too).
+setopt HIST_IGNORE_SPACE

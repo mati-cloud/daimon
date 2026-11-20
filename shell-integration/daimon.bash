@@ -25,6 +25,9 @@ for _daimon_rc in ~/.bash_profile ~/.bash_login ~/.profile; do
 done
 builtin unset _daimon_rc
 
+# A command typed with a leading space stays out of history (daimon's store skips it too).
+[[ "${HISTCONTROL-}" == *ignorespace* || "${HISTCONTROL-}" == *ignoreboth* ]] || HISTCONTROL="${HISTCONTROL:+$HISTCONTROL:}ignorespace"
+
 DAIMON_BIN="${DAIMON_BIN:-daimon}"
 
 # The app points DAIMON_BIN at its bundled CLI, which isn't on PATH — make

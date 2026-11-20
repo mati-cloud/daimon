@@ -83,6 +83,8 @@ use tracing::{error, info, warn};
 
 /// How long the event bus waits on one client before giving up on it.
 const STALL_LIMIT: Duration = Duration::from_secs(10);
+/// How long a new connection has to complete the WebSocket handshake.
+const HANDSHAKE_LIMIT: Duration = Duration::from_secs(5);
 
 /// Largest output message built from queued chunks (see the per-client send task).
 const MERGE_LIMIT: usize = 64 << 10;
@@ -146,7 +148,7 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
         let token = token.clone();
         let (client_tx, mut client_rx) = mpsc::channel::<SessionEvent>(256);
         let kill = Arc::new(Notify::new());
-        clients.lock().await.push(Client { tx: client_tx.clone(), kill: kill.clone() });
+        let clients = clients.clone();
 
         tokio::spawn(async move {
             // The daemon runs shells, so every handshake is checked (see `authorize`).
@@ -162,10 +164,15 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
                     }
                 }
             };
-            let ws = match tokio_tungstenite::accept_hdr_async(stream, check).await {
-                Ok(ws) => ws,
-                Err(e) => { info!("rejected connection from {}: {}", addr, e); return; }
+            // A client joins the event bus only once authorized, and must finish the handshake
+            // in time: a connection that never does would otherwise fill its queue and stall
+            // the bus (and every session's output) for STALL_LIMIT.
+            let ws = match tokio::time::timeout(HANDSHAKE_LIMIT, tokio_tungstenite::accept_hdr_async(stream, check)).await {
+                Ok(Ok(ws)) => ws,
+                Ok(Err(e)) => { info!("rejected connection from {}: {}", addr, e); return; }
+                Err(_) => { warn!("connection from {addr} didn't finish the handshake in {HANDSHAKE_LIMIT:?}"); return; }
             };
+            clients.lock().await.push(Client { tx: client_tx.clone(), kill: kill.clone() });
             let (mut sink, mut source) = ws.split();
 
             let send_task = tokio::spawn(async move {
@@ -465,7 +472,8 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
                                 let _ = tx.send(SessionEvent::Response { req_id, ok, data }).await;
                             });
                         }
-                        Err(e) => error!("bad command: {}: {}", text, e),
+                        // Not the message itself: a `write` carries keystrokes (passwords at a prompt).
+                        Err(e) => error!("bad command ({} bytes): {}", text.len(), e),
                     }
                 }
             }

@@ -1042,7 +1042,8 @@ function Daimon() {
     window.addEventListener("mouseup", onUp);
   };
 
-  const submit = async (cmd: string, forSessionId?: string) => {
+  /** `secret` (leading space, like HISTCONTROL=ignorespace): runs, but isn't saved to history or the block store. */
+  const submit = async (cmd: string, forSessionId?: string, secret = false) => {
     const sessionId = forSessionId ?? activeId;
     const sess = sessions.find((s) => s.id === sessionId) ?? sessions[0]!;
     followRef.current.set(sessionId, true);
@@ -1076,6 +1077,10 @@ function Daimon() {
       return;
     }
 
+    if (secret) {
+      await runBlock(sessionId, cmd, sess.state, undefined, true);
+      return;
+    }
     const isDup = sess.history[sess.history.length - 1] === cmd;
     const ts = Date.now();
     const newHistory = isDup ? sess.history : [...sess.history, cmd];
@@ -1094,14 +1099,15 @@ function Daimon() {
    * Run `cmd` as a new block in a session — or, with `resume`, show a command that is
    * already running in the daemon (the UI restarted while it ran) as that block.
    */
-  const runBlock = async (sessionId: string, cmd: string, state: State, resume?: AttachInfo) => {
+  const runBlock = async (sessionId: string, cmd: string, state: State, resume?: AttachInfo, secret = false) => {
     const pendingId = Math.random().toString(36).slice(2);
     setSessions((prev) => prev.map((s) => s.id === sessionId ? {
       ...s,
       blocks: [...s.blocks, { id: pendingId, input: cmd, cwd: s.state.cwd, ctx: s.state.ctx.name, at: now(), ts: resume?.startedAt || Date.now(), ms: 0, code: 0, out: [], pending: true }],
     } : s));
 
-    const runPromise = run(cmd, state, sessionId, (updated) => {
+    // The leading space also reaches the shell, so its own history skips the command.
+    const runPromise = run(secret ? " " + cmd : cmd, state, sessionId, (updated) => {
       setSessions((prev) => prev.map((s) => s.id === sessionId ? {
         ...s,
         blocks: s.blocks.map((x) => x.id === pendingId ? { ...updated, id: pendingId } : x),
@@ -1118,6 +1124,7 @@ function Daimon() {
     // while, and it used to run inside the state update, ahead of the paint.
     const persist = async (out: typeof block.out, json?: Promise<string>) => {
       if (clear) { shell.blockClear(sessionId).catch(() => {}); return; }
+      if (secret) return;
       // Encoded by the parse worker when the block shows exactly its output.
       const output_json = json ? await json : JSON.stringify(out ?? []);
       shell.blockSave({
@@ -1235,7 +1242,7 @@ function Daimon() {
                 historyTs={pane.historyTs}
                 initialValue={pane.draft ?? ""}
                 onDraftChange={(v) => setSessions((prev) => prev.map((s) => s.id === paneSessionId ? { ...s, draft: v } : s))}
-                onSubmit={(cmd) => { if (!isFocused) setFocusedPane(splitSessionId && paneSessionId === splitSessionId ? "right" : "left"); submit(cmd, paneSessionId); }}
+                onSubmit={(cmd, secret) => { if (!isFocused) setFocusedPane(splitSessionId && paneSessionId === splitSessionId ? "right" : "left"); submit(cmd, paneSessionId, secret); }}
                 gitBranch={isFocused ? gitBranch : null}
                 gitDirty={isFocused ? gitDirty : false}
                 gitAhead={isFocused ? gitAhead : 0}

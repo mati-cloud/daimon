@@ -49,7 +49,8 @@ export function Composer({
   ctx: string;
   history: string[];
   historyTs?: number[];
-  onSubmit: (cmd: string) => void;
+  /** `secret`: typed with a leading space — run it, but keep it out of history and saved blocks. */
+  onSubmit: (cmd: string, secret?: boolean) => void;
   onDraftChange?: (v: string) => void;
   initialValue?: string;
   gitBranch?: string | null;
@@ -356,13 +357,14 @@ export function Composer({
         e.preventDefault();
         const final = accept();
         const cmd = final.trim();
-        if (cmd) { onSubmit(cmd); setInputValue(""); setHistIndex(null); }
+        if (cmd) { onSubmit(cmd, final.startsWith(" ")); setInputValue(""); setHistIndex(null); }
         return;
       }
       e.preventDefault();
-      const cmd = (inputRef.current?.value ?? "").trim();
+      const raw = inputRef.current?.value ?? "";
+      const cmd = raw.trim();
       if (!cmd) return;
-      onSubmit(cmd);
+      onSubmit(cmd, raw.startsWith(" "));
       setInputValue("");
       setHistIndex(null);
       setOpen(false);

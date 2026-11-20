@@ -9,6 +9,7 @@ use regex_lite::Regex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::Read;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 
@@ -25,7 +26,15 @@ pub fn link_preview(url: &str) -> Value {
     if let Some(v) = cache().lock().unwrap().get(url) {
         return v.clone();
     }
-    let v = if allowed(url) { fetch(url).map(|html| parse(url, &html)).unwrap_or(Value::Null) } else { Value::Null };
+    let mut v = fetch(url).map(|html| parse(url, &html)).unwrap_or(Value::Null);
+    // The webview loads the image and icon itself: drop any that point at a private address.
+    for key in ["image", "icon"] {
+        if let Some(slot) = v.get_mut(key) {
+            if !slot.as_str().is_some_and(|u| u.starts_with("https://") && allowed(u).is_some()) {
+                *slot = Value::Null;
+            }
+        }
+    }
     let mut c = cache().lock().unwrap();
     if c.len() >= CACHE_CAP {
         c.clear();
@@ -34,62 +43,106 @@ pub fn link_preview(url: &str) -> Value {
     v
 }
 
-/// Public http(s) URLs only: no credentials, no loopback / private / link-local / bare hosts.
-/// Output often mentions dev servers and internal endpoints; those are never fetched.
-fn allowed(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")) else { return false };
+/// A URL's host and port, for http(s) URLs without credentials. IPv6 literals aren't
+/// previewed (curl's `--resolve` pinning below would need them bracketed; they're rare in output).
+fn target(url: &str) -> Option<(String, u16)> {
+    let (rest, port) = match url.strip_prefix("https://") {
+        Some(r) => (r, 443),
+        None => (url.strip_prefix("http://")?, 80),
+    };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    if authority.contains('@') || authority.starts_with('[') {
-        return false; // userinfo, or an IPv6 literal
+    if authority.contains(['@', '[', '\\']) {
+        return None; // userinfo, an IPv6 literal, or a backslash some parsers treat as '/'
     }
-    let host = authority.split(':').next().unwrap_or("").to_ascii_lowercase();
-    if host.is_empty() || !host.contains('.') {
-        return false;
-    }
-    if [".local", ".localhost", ".internal", ".lan", ".home", ".corp", ".test", ".invalid"]
-        .iter()
-        .any(|s| host.ends_with(s))
-    {
-        return false;
-    }
-    let octets: Vec<u8> = host.split('.').filter_map(|p| p.parse().ok()).collect();
-    if octets.len() == 4 && host.split('.').count() == 4 {
-        return !matches!(
-            octets[..],
-            [0, ..] | [10, ..] | [127, ..] | [169, 254, ..] | [192, 168, ..] | [100, 64..=127, ..]
-        ) && !(octets[0] == 172 && (16..=31).contains(&octets[1]));
-    }
-    true
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((h, p)) => (h, p.parse().ok()?),
+        None => (authority, port),
+    };
+    let host = host.to_ascii_lowercase();
+    (!host.is_empty()).then_some((host, port))
 }
 
+/// Only addresses on the public internet. Output often mentions dev servers, routers and
+/// internal endpoints; those are never fetched.
+fn public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            !(v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_unspecified()
+                || v4.is_broadcast() || v4.is_documentation() || v4.is_multicast()
+                || a == 0 || a >= 240 || (a == 100 && (64..=127).contains(&b)) || (a == 198 && (b == 18 || b == 19)))
+        }
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => public(IpAddr::V4(v4)),
+            None => !(v6.is_loopback() || v6.is_unspecified() || v6.is_multicast()
+                || v6.is_unique_local() || v6.is_unicast_link_local()
+                || v6.segments()[0] == 0x64 && v6.segments()[1] == 0xff9b // NAT64 (wraps IPv4)
+                || v6.segments()[0] == 0x2002                              // 6to4 (wraps IPv4)
+                || v6.segments()[0] == 0x2001 && v6.segments()[1] == 0xdb8),
+        },
+    }
+}
+
+/// Resolves the URL's host once and returns the address to connect to, if every address
+/// it resolves to is public. curl is then pinned to that address (`--resolve`), so a DNS
+/// answer that changes between this check and the fetch (rebinding) can't redirect it.
+fn allowed(url: &str) -> Option<(String, u16, IpAddr)> {
+    let (host, port) = target(url)?;
+    let addrs: Vec<IpAddr> = (host.as_str(), port).to_socket_addrs().ok()?.map(|a| a.ip()).collect();
+    if addrs.is_empty() || !addrs.iter().all(|ip| public(*ip)) {
+        return None;
+    }
+    let ip = *addrs.iter().find(|ip| ip.is_ipv4()).unwrap_or(&addrs[0]);
+    Some((host, port, ip))
+}
+
+const MAX_REDIRECTS: usize = 5;
+
+/// Fetches the page's <head>, following redirects one hop at a time so each new host goes
+/// through the same `allowed` check (curl's own `-L` would follow them unchecked).
 fn fetch(url: &str) -> Option<String> {
-    let mut child = Command::new("curl")
-        .env("PATH", crate::shell_env::path())
-        .args([
-            "-sSL",
-            "--compressed",
-            "--max-time", "6",
-            "--max-redirs", "5",
-            "--proto", "=http,https",
-            "--proto-redir", "=http,https",
-            "-A", "Mozilla/5.0 (compatible; daimon-link-preview)",
-            "-H", "Accept: text/html,application/xhtml+xml",
-            "--",
-            url,
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let mut buf = Vec::with_capacity(64 * 1024);
-    let _ = child.stdout.take()?.take(MAX_BYTES as u64).read_to_end(&mut buf);
-    let _ = child.kill();
-    let _ = child.wait();
-    // The tags we want live in <head>; stop there so a huge body isn't scanned.
-    let text = String::from_utf8_lossy(&buf);
-    let end = text.find("</head>").or_else(|| text.find("</HEAD>")).unwrap_or(text.len());
-    Some(text[..end].to_string())
+    let mut url = url.to_string();
+    for _ in 0..=MAX_REDIRECTS {
+        let (host, port, ip) = allowed(&url)?;
+        let ip = match ip { IpAddr::V6(v6) => format!("[{v6}]"), v4 => v4.to_string() };
+        let mut child = Command::new("curl")
+            .env("PATH", crate::shell_env::path())
+            .args([
+                "-s",
+                "--compressed",
+                "--max-time", "6",
+                "--max-redirs", "0",
+                "--proto", "=http,https",
+                "--resolve", &format!("{host}:{port}:{ip}"),
+                "-A", "Mozilla/5.0 (compatible; daimon-link-preview)",
+                "-H", "Accept: text/html,application/xhtml+xml",
+                // The redirect target (empty if none) goes to stderr, apart from the body.
+                "-w", "%{stderr}%{redirect_url}",
+                "--",
+                &url,
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .ok()?;
+        let mut buf = Vec::with_capacity(64 * 1024);
+        let _ = child.stdout.take()?.take(MAX_BYTES as u64).read_to_end(&mut buf);
+        let _ = child.kill();
+        let mut redirect = String::new();
+        let _ = child.stderr.take()?.take(8192).read_to_string(&mut redirect);
+        let _ = child.wait();
+        let redirect = redirect.trim();
+        if !redirect.is_empty() {
+            url = redirect.to_string();
+            continue;
+        }
+        // The tags we want live in <head>; stop there so a huge body isn't scanned.
+        let text = String::from_utf8_lossy(&buf);
+        let end = text.find("</head>").or_else(|| text.find("</HEAD>")).unwrap_or(text.len());
+        return Some(text[..end].to_string());
+    }
+    None
 }
 
 fn re(pat: &str) -> Regex {
@@ -232,15 +285,20 @@ mod tests {
 
     #[test]
     fn blocks_private_hosts() {
-        assert!(allowed("https://github.com/iammati/daimon.git"));
-        assert!(!allowed("http://localhost:3000"));
-        assert!(!allowed("http://127.0.0.1/x"));
-        assert!(!allowed("http://192.168.1.5"));
-        assert!(!allowed("http://172.20.0.1"));
-        assert!(!allowed("https://user:pw@example.com"));
-        assert!(!allowed("http://[::1]/"));
-        assert!(!allowed("http://foo.internal/"));
-        assert!(!allowed("ftp://example.com"));
+        for u in [
+            "http://localhost:3000", "http://127.0.0.1/x", "http://127.1/", "http://0x7f.0.0.1/",
+            "http://2130706433/", "http://192.168.1.5", "http://172.20.0.1", "http://10.0.0.1",
+            "http://169.254.169.254/latest/meta-data/", "http://100.64.0.1", "http://0.0.0.0/",
+            "https://user:pw@example.com", "http://[::1]/", "ftp://example.com", "http://localhost./",
+        ] {
+            assert!(allowed(u).is_none(), "{u}");
+        }
+        assert!(!public("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(!public("fd00::1".parse().unwrap()));
+        assert!(!public("fe80::1".parse().unwrap()));
+        assert!(public("1.1.1.1".parse().unwrap()));
+        assert!(public("2606:4700::1111".parse().unwrap()));
+        assert_eq!(target("https://example.com:8443/a"), Some(("example.com".into(), 8443)));
     }
 
     #[test]

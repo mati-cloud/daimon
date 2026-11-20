@@ -15,7 +15,8 @@ export type LinkPreview = {
 
 const KEY = "daimon-link-previews";
 const listeners = new Set<() => void>();
-let enabled = (() => { try { return localStorage.getItem(KEY) !== "0"; } catch { return true; } })();
+// Opt-in: a fetched URL tells its server you looked at the output it appeared in.
+let enabled = (() => { try { return localStorage.getItem(KEY) === "1"; } catch { return false; } })();
 
 export function setLinkPreviewsEnabled(v: boolean) {
   enabled = v;

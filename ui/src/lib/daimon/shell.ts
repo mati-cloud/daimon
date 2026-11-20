@@ -715,7 +715,7 @@ export async function run(
 
     activeCleanups.set(tabId, cleanup);
     if (resume) return; // already running — nothing to send
-    ensureReady(tabId).then(() => { commandWritten = true; shell.writeCommand(tabId, effectiveInput + "\n", input).catch(() => cleanup()); });
+    ensureReady(tabId).then(() => { commandWritten = true; shell.writeCommand(tabId, (raw.startsWith(" ") ? " " : "") + effectiveInput + "\n", input).catch(() => cleanup()); });
   });
 }
 
