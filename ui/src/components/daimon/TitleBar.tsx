@@ -77,7 +77,7 @@ export function TitleBar({ left }: { left?: React.ReactNode }) {
           onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); sendWindow("resize-top"); } }}
         />
       )}
-      {left ? <div className="relative flex h-full w-56 shrink-0 items-center justify-between px-5">{left}</div> : <div />}
+      {left ? <div className="relative flex h-full w-[var(--sidebar-w,14rem)] shrink-0 items-center justify-between px-5">{left}</div> : <div />}
       <div className="no-drag relative flex h-full">
         <WindowButton label="Minimize" onClick={() => sendWindow("minimize")}>
           <path d="M0.5 5.5h9" />

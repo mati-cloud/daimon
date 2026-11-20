@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { DaimonToaster } from "@/components/daimon/DaimonToaster";
 import { PluginGate } from "@/components/daimon/PluginGate";
+import { SidebarResizer, loadSidebarWidth } from "@/components/daimon/SidebarResizer";
+import { DaimonToaster } from "@/components/daimon/DaimonToaster";
 import { PlusIcon, XIcon, SunIcon, ZapIcon, PanelLeftIcon, GitBranchIcon, SearchIcon, EyeOffIcon, EyeIcon, SplitSquareHorizontalIcon, ArrowUpRightIcon, LinkIcon, BellIcon } from "lucide-react";
 import { BlockMeta, BlockView, PresentationModeContext } from "@/components/daimon/BlockView";
 import { CommandIcon } from "@/components/daimon/CommandIcon";
@@ -218,6 +219,8 @@ function Daimon() {
   };
   const [theme, setTheme] = useState<Theme>("light");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
+  const [sidebarDragging, setSidebarDragging] = useState(false);
   const [gitBranch, setGitBranch] = useState<string | null>(null);
   const [gitDirty, setGitDirty] = useState(false);
   const [gitAhead, setGitAhead] = useState(0);
@@ -1356,7 +1359,10 @@ function Daimon() {
 
   return (
     <PresentationModeContext.Provider value={presentationMode}>
-    <div className="flex flex-col h-screen bg-transparent text-foreground overflow-hidden">
+    <div
+      className="flex flex-col h-screen bg-transparent text-foreground overflow-hidden"
+      style={{ "--sidebar-w": `${sidebarWidth}px` } as React.CSSProperties}
+    >
       <DaimonToaster />
       <PluginGate />
 
@@ -1364,7 +1370,7 @@ function Daimon() {
 
       <div className="flex flex-1 overflow-hidden">
       {/* Sidebar */}
-      <aside className={`shrink-0 flex-col border-r border-border bg-sidebar/70 glass chrome-surface flex transition-all duration-200 overflow-hidden ${sidebarOpen ? "w-56" : "w-0 border-r-0"}`}>
+      <aside className={`shrink-0 flex-col border-r border-border bg-sidebar/70 glass chrome-surface flex overflow-hidden ${sidebarDragging ? "" : "transition-all duration-200"} ${sidebarOpen ? "w-[var(--sidebar-w)]" : "w-0 border-r-0"}`}>
         {/* Wordmark — on Windows it sits in the caption strip (top-left corner) instead, see TitleBar's `left` */}
         {customFrame
           ? <div style={{ height: 36 + 12 }} />
@@ -1527,6 +1533,13 @@ function Daimon() {
 
         <UpdatePill />
       </aside>
+      {sidebarOpen && (
+        <SidebarResizer
+          width={sidebarWidth}
+          onWidth={setSidebarWidth}
+          onDragging={setSidebarDragging}
+        />
+      )}
 
       {/* Main */}
       <main className="relative flex min-w-0 flex-1 flex-col bg-background/70 glass chrome-surface">
