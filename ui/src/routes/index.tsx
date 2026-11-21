@@ -984,20 +984,32 @@ function Daimon() {
       const block = active.blocks.find(b => b.id === hoveredBlockId);
       if (!block) return;
       const key = e.key.toUpperCase();
+      const targets = selectedBlockIds.size > 0
+        ? active.blocks.filter(b => selectedBlockIds.has(b.id))
+        : [block];
+      const n = targets.length;
       if (key === "C") {
         e.preventDefault();
-        const text = `$ ${block.input}\n${blockOutputText(block)}`.trimEnd();
-        navigator.clipboard.writeText(text).then(() => toast.success("Block copied", { duration: 1500 }));
+        const text = targets.map(b => `$ ${b.input}\n${blockOutputText(b)}`.trimEnd()).join("\n---\n");
+        navigator.clipboard.writeText(text).then(() =>
+          toast.success(n > 1 ? `${n} blocks copied` : "Block copied", { duration: 1500 })
+        );
       } else if (key === "I") {
         e.preventDefault();
-        navigator.clipboard.writeText(block.input).then(() => toast.success("Command copied", { duration: 1500 }));
+        const text = targets.map(b => b.input).join("\n");
+        navigator.clipboard.writeText(text).then(() =>
+          toast.success(n > 1 ? `${n} commands copied` : "Command copied", { duration: 1500 })
+        );
       } else if (key === "O") {
         e.preventDefault();
-        const out = blockOutputText(block);
-        if (out) navigator.clipboard.writeText(out).then(() => toast.success("Output copied", { duration: 1500 }));
+        const parts = targets.map(b => blockOutputText(b)).filter(Boolean);
+        if (parts.length) navigator.clipboard.writeText(parts.join("\n---\n")).then(() =>
+          toast.success(n > 1 ? `${n} outputs copied` : "Output copied", { duration: 1500 })
+        );
       } else if (key === "R") {
         e.preventDefault();
-        submit(block.input);
+        targets.forEach(b => submit(b.input));
+        if (n > 1) toast.success(`Re-running ${n} blocks`, { duration: 1500 });
       } else if (key === "E") {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("block-toggle-collapse", { detail: { blockId: block.id } }));
