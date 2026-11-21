@@ -84,8 +84,11 @@ setupNativeDrag(win);
 setMinSize(win);
 
 // Request Accessibility permission on first launch (needed for CGEventTap keyboard suppression).
-// Shows macOS system prompt if not already granted; silently no-ops if it is.
-if (!hasAccessibilityPermission()) requestAccessibilityPermission();
+// Deferred so the window is visible and frontmost before the dialog appears — macOS
+// suppresses the AXIsProcessTrustedWithOptions prompt when the app has no visible window.
+setTimeout(() => {
+  if (!hasAccessibilityPermission()) requestAccessibilityPermission();
+}, 1000);
 
 const HOST_FOCUS_JS = `window.dispatchEvent(new Event("daimon:host-focus"))`;
 let focusTimer: ReturnType<typeof setTimeout> | null = null;
