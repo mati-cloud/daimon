@@ -15,9 +15,10 @@ export function setKeyLock(on: boolean) {
 
 function swallow(e: KeyboardEvent) {
   if (!locked) return;
-  e.stopImmediatePropagation();
   const inModal = e.target instanceof Element && e.target.closest("[data-key-lock-allow]");
-  if (!inModal) e.preventDefault();
+  if (inModal) return; // let key-capture overlays receive the event normally
+  e.stopImmediatePropagation();
+  e.preventDefault();
 }
 
 for (const type of ["keydown", "keyup", "keypress"] as const) {
