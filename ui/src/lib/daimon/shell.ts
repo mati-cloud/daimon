@@ -604,6 +604,13 @@ export async function run(
     globalOutputOff = shell.onOutput((tid, data) => {
       if (tid !== tabId) return;
       if (!commandWritten) return; // discard pre-command PTY noise
+      // After Ctrl+C, zsh may suppress precmd (no OSC 133;A). Arm a short timer on any
+      // PTY output following an interrupt — if onContext doesn't beat it, cleanup runs.
+      // Must be checked before the commandStarted gate (startup-prompt race can leave it false).
+      const recentInterrupt = (lastInterruptAt.get(tabId) ?? 0) > Date.now() - 1000;
+      if (recentInterrupt && !done && !sigintCleanupTimer) {
+        sigintCleanupTimer = setTimeout(() => { sigintCleanupTimer = null; if (!done) cleanup(); }, 600);
+      }
       if (!commandStarted && !isInteractive && !isStreamingInteractive && !resume) return; // discard shell echo before OSC 133;C
       if (isAltScreen(tabId)) { sawAltScreen = true; return; }
       // Buffer every byte for replay
@@ -622,12 +629,6 @@ export async function run(
       // Auto-detect TUI: alt-screen/mouse-enable fire immediately (never from prompt themes);
       // all other sequences only count after some output exists. Also suppress for 1s after
       // Ctrl+C: zsh redraws prompt with cursor-pos/erase sequences that look like TUI startup.
-      const recentInterrupt = (lastInterruptAt.get(tabId) ?? 0) > Date.now() - 1000;
-      // After Ctrl+C, zsh may suppress precmd (no OSC 133;A). Arm a short timer when we
-      // see PTY output following an interrupt — if onContext doesn't beat it, cleanup runs.
-      if (recentInterrupt && commandStarted && !done && !sigintCleanupTimer) {
-        sigintCleanupTimer = setTimeout(() => { sigintCleanupTimer = null; if (!done) cleanup(); }, 600);
-      }
       if (!detectedTUI && !recentInterrupt && (TUI_ALTMOUSE_RE.test(data) || (TUI_RE.test(data) && rawRun !== null && rawRun.length > 0))) {
         detectedTUI = true;
         // Keep normalBuf — logs before the TUI/spinner phase are valid output to preserve
