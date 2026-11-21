@@ -1,15 +1,65 @@
 // macOS-only: suppress all keyboard input system-wide during keymap capture.
 //
-// CGEventTap at kCGHIDEventTap discards key events before any app sees them —
-// including Spotlight, Mission Control, language switcher.
+// CGEventTap at kCGHIDEventTap discards key events before any app sees them.
 // Requires Accessibility: System Settings → Privacy & Security → Accessibility.
+//
+// The tap callback MUST NOT call back into JS — doing so deadlocks Bun's main
+// thread (the CFRunLoop callback blocks waiting for JS, which is blocked waiting
+// for the CFRunLoop). Instead we compile a tiny C dylib at startup whose callback
+// simply returns NULL (discard the event) with no JS involvement.
 
-import { dlopen, FFIType, ptr, JSCallback, type Pointer } from "bun:ffi";
+import { dlopen, FFIType, ptr, type Pointer } from "bun:ffi";
+import { spawnSync } from "bun";
+import { mkdtempSync, writeFileSync, existsSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 type Id = Pointer | null;
 const P = FFIType.ptr;
 
-// ── dlopen helpers (lazy, darwin-only paths) ──────────────────────────────────
+// ── C helper dylib ────────────────────────────────────────────────────────────
+// Compiled once per process into a temp dir. The callback returns NULL = discard.
+
+const HELPER_C = `
+#include <stddef.h>
+// CGEventTapCallBack signature — returns NULL to discard the event.
+// No CG headers needed; the function pointer type is what matters.
+void* daimonTapCallback(void* proxy, int type, void* event, void* refcon) {
+  return NULL;
+}
+`;
+
+let helperPath: string | null = null;
+
+function buildHelper(): string | null {
+  if (helperPath && existsSync(helperPath)) return helperPath;
+  try {
+    const sdk = spawnSync(["xcodebuild", "-sdk", "macosx", "-version", "Path"]);
+    const sdkPath = new TextDecoder().decode(sdk.stdout).trim();
+    if (!sdkPath) { console.error("[keyIntercept] xcodebuild SDK lookup failed"); return null; }
+
+    const dir = mkdtempSync(join(tmpdir(), "daimon-keytap-"));
+    const src = join(dir, "tap.c");
+    const out = join(dir, "tap.dylib");
+    writeFileSync(src, HELPER_C);
+    const r = spawnSync([
+      "xcrun", "--sdk", "macosx", "cc",
+      "-O2", "-dynamiclib", "-isysroot", sdkPath,
+      "-o", out, src,
+    ]);
+    if (r.exitCode !== 0) {
+      console.error("[keyIntercept] build helper failed:", new TextDecoder().decode(r.stderr));
+      return null;
+    }
+    helperPath = out;
+    return out;
+  } catch (e) {
+    console.error("[keyIntercept] build helper error:", e);
+    return null;
+  }
+}
+
+// ── dlopen helpers ────────────────────────────────────────────────────────────
 
 function loadCG() {
   return dlopen(
@@ -91,23 +141,25 @@ export function requestAccessibilityPermission(): boolean {
 const KEY_MASK = BigInt(0x1C00);
 
 let tapPort: Id = null;
-let tapCb: JSCallback | null = null;
 let locked = false;
 
 function installTap(): boolean {
   if (tapPort) return true;
   if (!hasAccessibilityPermission()) return false;
   try {
+    const dylib = buildHelper();
+    if (!dylib) return false;
+
+    // Load the C callback — pure native, no JS on the hot path.
+    const helper = dlopen(dylib, {
+      daimonTapCallback: { args: [P, FFIType.i32, P, P], returns: P },
+    });
+
     const cg = loadCG();
     const cf = loadCF();
 
-    tapCb = new JSCallback(
-      () => null, // return NULL = discard the event
-      { args: [P, FFIType.i32, P, P], returns: P },
-    );
-
     // kCGHIDEventTap=0, kCGHeadInsertEventTap=0, kCGEventTapOptionDefault=0
-    tapPort = cg.CGEventTapCreate(0, 0, 0, KEY_MASK, tapCb.ptr, null);
+    tapPort = cg.CGEventTapCreate(0, 0, 0, KEY_MASK, helper.symbols.daimonTapCallback, null);
     if (!tapPort) {
       console.error("[keyIntercept] CGEventTapCreate failed — Accessibility permission required");
       return false;
@@ -115,18 +167,16 @@ function installTap(): boolean {
 
     const rl  = cf.CFRunLoopGetMain();
     const src = cf.CFMachPortCreateRunLoopSource(null, tapPort, 0);
-    // kCFRunLoopDefaultMode = CFSTR("kCFRunLoopDefaultMode") — CF accepts the string directly.
     // kCFStringEncodingUTF8 = 0x08000100
-    const defaultMode = cf.CFStringCreateWithCString(null, ptr(Buffer.from("kCFRunLoopDefaultMode\0")), 0x08000100);
-    cf.CFRunLoopAddSource(rl, src, defaultMode);
+    const mode = cf.CFStringCreateWithCString(null, ptr(Buffer.from("kCFRunLoopDefaultMode\0")), 0x08000100);
+    cf.CFRunLoopAddSource(rl, src, mode);
 
-    cg.CGEventTapEnable(tapPort, false); // start disabled until setKeyInterceptLock(true)
+    cg.CGEventTapEnable(tapPort, false);
     console.log("[keyIntercept] tap installed");
     return true;
   } catch (e) {
     console.error("[keyIntercept] installTap:", e);
     tapPort = null;
-    tapCb = null;
     return false;
   }
 }
