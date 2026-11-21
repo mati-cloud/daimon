@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   PaletteIcon,
   TerminalIcon,
@@ -87,47 +87,119 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
   );
 }
 
+/** Convert a KeyboardEvent into a human-readable combo string like "⌘⇧ F". */
+function eventToCombo(e: KeyboardEvent): string {
+  const parts: string[] = [];
+  if (e.metaKey)  parts.push("⌘");
+  if (e.ctrlKey)  parts.push("Ctrl");
+  if (e.altKey)   parts.push("Alt");
+  if (e.shiftKey) parts.push("⇧");
+  const k = e.key;
+  // Ignore pure modifier presses
+  if (["Meta","Control","Alt","Shift"].includes(k)) return parts.join("") || "";
+  const display: Record<string, string> = {
+    " ": "Space", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→",
+    Enter: "Enter", Escape: "Esc", Tab: "Tab", Backspace: "⌫", Delete: "Del",
+  };
+  parts.push(display[k] ?? (k.length === 1 ? k.toUpperCase() : k));
+  return parts.join(e.metaKey || e.ctrlKey || e.altKey ? " " : "");
+}
+
+function KeyCapture({ shortcutDesc, initial, onConfirm, onCancel }: {
+  shortcutDesc: string;
+  initial: string;
+  onConfirm: (combo: string) => void;
+  onCancel: () => void;
+}) {
+  const [combo, setCombo] = useState("");
+  const [phase, setPhase] = useState<"waiting" | "captured">("waiting");
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const c = eventToCombo(e);
+      if (!c) return;
+      setCombo(c);
+      setPhase("captured");
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
+  return (
+    <div
+      className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-6 bg-card/97 backdrop-blur-sm rounded-r-[inherit]"
+      onClick={e => e.stopPropagation()}
+    >
+      <span className="font-sans text-xs text-muted-foreground/60 uppercase tracking-widest">Remapping</span>
+      <span className="font-sans text-base text-foreground/90 font-medium">{shortcutDesc}</span>
+
+      {/* Key display */}
+      <div className="flex items-center justify-center min-h-[5rem]">
+        {phase === "waiting" ? (
+          <span className="font-mono text-muted-foreground/40 text-sm animate-pulse">press keys…</span>
+        ) : (
+          <span className="font-mono text-4xl font-bold tracking-widest text-foreground">
+            {combo.split(" ").map((k, i) => (
+              <span key={i}>
+                {i > 0 && <span className="text-muted-foreground/40 text-2xl mx-1">+</span>}
+                <kbd className="inline-flex items-center justify-center rounded-lg border-2 border-signal/60 bg-signal/10 px-3 py-1 text-signal">{k}</kbd>
+              </span>
+            ))}
+          </span>
+        )}
+      </div>
+
+      <div className="font-mono text-[11px] text-muted-foreground/50">
+        {phase === "captured" ? "press again to re-capture" : `current: ${initial || "none"}`}
+      </div>
+
+      <div className="flex items-center gap-3 mt-2">
+        <button
+          onClick={onCancel}
+          className="rounded border border-border px-4 py-1.5 font-mono text-[12px] text-muted-foreground hover:text-foreground transition-colors"
+        >Cancel</button>
+        {phase === "captured" && (
+          <button
+            onClick={() => onConfirm(combo)}
+            className="rounded border border-signal/60 bg-signal/10 px-4 py-1.5 font-mono text-[12px] text-signal hover:bg-signal/20 transition-colors"
+          >Confirm</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function KeymapsPanel() {
   const [shortcuts, setShortcuts] = useState<ResolvedShortcut[]>(() => getShortcuts());
-  // id -> draft value being typed (before commit)
-  const [drafts, setDrafts] = useState<Map<string, string>>(new Map());
-  // id currently being edited
-  const [editing, setEditing] = useState<string | null>(null);
+  const [capturing, setCapturing] = useState<{ id: string; desc: string; current: string } | null>(null);
 
-  // Re-read shortcuts when registry changes (another tab, plugin load, etc.)
   useEffect(() => subscribeKeymaps(() => setShortcuts(getShortcuts())), []);
 
-  const startEdit = (id: string, current: string) => {
-    setEditing(id);
-    setDrafts(prev => new Map(prev).set(id, current));
-  };
+  const startCapture = (s: ResolvedShortcut) =>
+    setCapturing({ id: s.id, desc: s.description, current: s.effectiveCombo });
 
-  const commitEdit = useCallback((id: string) => {
-    const draft = drafts.get(id);
-    if (draft !== undefined) {
-      setOverride(id, draft.trim());
-      setShortcuts(getShortcuts());
-    }
-    setEditing(null);
-  }, [drafts]);
-
-  const cancelEdit = (id: string) => {
-    setDrafts(prev => { const n = new Map(prev); n.delete(id); return n; });
-    setEditing(null);
+  const confirmCapture = (combo: string) => {
+    if (!capturing) return;
+    setOverride(capturing.id, combo);
     setShortcuts(getShortcuts());
-  };
-
-  const onDraftChange = (id: string, value: string) => {
-    setDrafts(prev => new Map(prev).set(id, value));
-    // Live conflict preview while typing
-    setShortcuts(getShortcuts(id, value.trim()));
+    setCapturing(null);
   };
 
   const anyConflict = shortcuts.some(s => s.conflict);
   const categories = Array.from(new Set(shortcuts.map(s => s.category)));
 
   return (
-    <div>
+    <div className="relative">
+      {capturing && (
+        <KeyCapture
+          shortcutDesc={capturing.desc}
+          initial={capturing.current}
+          onConfirm={confirmCapture}
+          onCancel={() => setCapturing(null)}
+        />
+      )}
       {anyConflict && (
         <div className="mx-4 mt-3 mb-1 flex items-start gap-2 rounded-md border border-alarm/40 bg-alarm/8 px-3 py-2.5">
           <span className="font-mono text-[11px] font-semibold text-alarm leading-snug">
@@ -138,53 +210,35 @@ function KeymapsPanel() {
       {categories.map(cat => (
         <div key={cat}>
           <div className="px-4 pt-4 pb-1 font-mono text-[10px] text-muted-foreground/60 uppercase tracking-widest">{cat}</div>
-          {shortcuts.filter(s => s.category === cat).map(s => {
-            const isEditing = editing === s.id;
-            const draft = drafts.get(s.id) ?? s.effectiveCombo;
-            return (
-              <div key={s.id} className={`flex items-center justify-between px-4 py-2 border-b border-border/30 ${s.conflict ? "bg-alarm/5" : ""}`}>
-                <div className="flex flex-col min-w-0 mr-3">
-                  <span className="font-sans text-sm text-foreground/90">{s.description}</span>
-                  {s.source === "plugin" && s.pluginName && (
-                    <span className="font-mono text-[10px] text-muted-foreground/50">plugin: {s.pluginName}</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {s.conflict && (
-                    <span className="font-mono text-[10px] text-alarm bg-alarm/10 px-1.5 py-0.5 rounded">conflict</span>
-                  )}
-                  {s.overridden && !isEditing && (
-                    <button
-                      onClick={() => { setOverride(s.id, ""); setShortcuts(getShortcuts()); }}
-                      className="font-mono text-[10px] text-muted-foreground/50 hover:text-foreground"
-                      title="Reset to default"
-                    >reset</button>
-                  )}
-                  {isEditing ? (
-                    <input
-                      autoFocus
-                      value={draft}
-                      onChange={e => onDraftChange(s.id, e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === "Enter") { e.preventDefault(); commitEdit(s.id); }
-                        if (e.key === "Escape") cancelEdit(s.id);
-                      }}
-                      onBlur={() => commitEdit(s.id)}
-                      className={`w-32 rounded border px-2 py-0.5 font-mono text-[12px] outline-none ${s.conflict ? "border-alarm text-alarm bg-alarm/5" : "border-signal/40 text-foreground bg-muted"}`}
-                    />
-                  ) : (
-                    <button
-                      onClick={() => startEdit(s.id, s.effectiveCombo)}
-                      title="Click to remap"
-                      className={`rounded border px-2 py-0.5 font-mono text-[12px] transition-colors hover:border-signal/60 ${s.conflict ? "border-alarm/60 bg-alarm/5 text-alarm" : s.overridden ? "border-signal/40 text-signal" : "border-border text-foreground/80"}`}
-                    >
-                      {s.effectiveCombo || <span className="text-muted-foreground/40 italic">none</span>}
-                    </button>
-                  )}
-                </div>
+          {shortcuts.filter(s => s.category === cat).map(s => (
+            <div key={s.id} className={`flex items-center justify-between px-4 py-2 border-b border-border/30 ${s.conflict ? "bg-alarm/5" : ""}`}>
+              <div className="flex flex-col min-w-0 mr-3">
+                <span className="font-sans text-sm text-foreground/90">{s.description}</span>
+                {s.source === "plugin" && s.pluginName && (
+                  <span className="font-mono text-[10px] text-muted-foreground/50">plugin: {s.pluginName}</span>
+                )}
               </div>
-            );
-          })}
+              <div className="flex items-center gap-2 shrink-0">
+                {s.conflict && (
+                  <span className="font-mono text-[10px] text-alarm bg-alarm/10 px-1.5 py-0.5 rounded">conflict</span>
+                )}
+                {s.overridden && (
+                  <button
+                    onClick={() => { setOverride(s.id, ""); setShortcuts(getShortcuts()); }}
+                    className="font-mono text-[10px] text-muted-foreground/50 hover:text-foreground"
+                    title="Reset to default"
+                  >reset</button>
+                )}
+                <button
+                  onClick={() => startCapture(s)}
+                  title="Click to remap"
+                  className={`rounded border px-2 py-0.5 font-mono text-[12px] transition-colors hover:border-signal/60 ${s.conflict ? "border-alarm/60 bg-alarm/5 text-alarm" : s.overridden ? "border-signal/40 text-signal" : "border-border text-foreground/80"}`}
+                >
+                  {s.effectiveCombo || <span className="text-muted-foreground/40 italic">none</span>}
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       ))}
     </div>

@@ -797,6 +797,8 @@ function Daimon() {
     const onKeyDown = (e: KeyboardEvent) => {
       // Keys typed into a full-screen program are the program's: Ctrl+P/K/D/W, Esc…
       if (inTerminal(e)) return;
+      // Any modal open: suppress all global shortcuts (settings, palette, search, etc.)
+      if (anyModalOpenRef.current) return;
       // Escape: no modifier required, only when a panel is open.
       if (e.key === "Escape") {
         if (globalSearchOpen) { setGlobalSearchOpen(false); setGlobalSearchQuery(""); return; }
@@ -914,6 +916,7 @@ function Daimon() {
 
     const onDown = (e: KeyboardEvent) => {
       if (inTerminal(e)) return;
+      if (anyModalOpenRef.current) return;
       const mod = (e.metaKey || e.ctrlKey) && e.shiftKey;
       const tuiActive = altScreenActive || tuiBlockIds.has(activeId);
       if (mod && !blockModRef.current) {
