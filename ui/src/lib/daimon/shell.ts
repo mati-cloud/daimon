@@ -636,7 +636,9 @@ export async function run(
       if (tid !== tabId) return;
       exitCode = code;
       // Interactive/TUI commands: remote shell never fires onContext, so resolve on exit.
-      if (isInteractive || isStreamingInteractive || detectedTUI || insideInteractiveSession) {
+      // SIGINT (exit 130): zsh suppresses precmd after interrupt, so OSC 133;A never arrives.
+      // Resolve quickly so the first Ctrl+C cancels immediately without spamming.
+      if (isInteractive || isStreamingInteractive || detectedTUI || insideInteractiveSession || code === 130) {
         tEnd ??= Date.now();
         // Give onContext a brief window to arrive first (local shell emits it quickly after exit)
         setTimeout(() => { if (!done) cleanup(); }, 300);
