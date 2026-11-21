@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useContext, createContext, useMemo, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { createPortal } from "react-dom";
-import { LoaderCircleIcon, XCircleIcon, ChevronDownIcon, GitBranchIcon, ChevronRightIcon, PlusIcon, ChevronUpIcon, XIcon, CircleDotIcon, CloudIcon, CloudOffIcon, ArrowUpIcon, ArrowDownIcon, CheckIcon, TagIcon } from "lucide-react";
+import { LoaderCircleIcon, XCircleIcon, ChevronDownIcon, GitBranchIcon, ChevronRightIcon, PlusIcon, ChevronUpIcon, XIcon, CircleDotIcon, CloudIcon, CloudOffIcon, ArrowUpIcon, ArrowDownIcon, CheckIcon, TagIcon, PinIcon, SearchIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Keys } from "./Kbd";
 import { MarkdownDiffView, MarkdownModeToggle } from "./MarkdownDiffView";
@@ -1100,7 +1100,7 @@ export function BlockMeta({ block, className = "" }: { block: Block; className?:
 function BlockModeHints({ open, collapsible }: { open: boolean; collapsible: "collapse" | "expand" | null }) {
   const shown = usePresence(open);
   if (!shown) return null;
-  const actions: [string, string][] = [["C", "copy all"], ["I", "cmd"], ["O", "output"], ["R", "re-run"]];
+  const actions: [string, string][] = [["C", "copy all"], ["I", "cmd"], ["O", "output"], ["R", "re-run"], ["F", "find"], ["P", "pin"]];
   if (collapsible) actions.push(["E", collapsible]);
   return (
     <span
@@ -2783,7 +2783,7 @@ function LinkCard({ p }: { p: LinkPreview }) {
   );
 }
 
-function BlockViewImpl({ block, modeActive = false, onRerun, isLast, currentCtx = "", sessionId = "", isTuiActive = false, promptingForInput = false, onSearch, onPathClick }: { block: Block; modeActive?: boolean; onRerun: (cmd: string) => void; isLast?: boolean; currentCtx?: string; sessionId?: string; isTuiActive?: boolean; promptingForInput?: boolean; onSearch?: ((q: string) => void) | null; onPathClick?: (path: string) => void }) {
+function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected = false, onPinToggle, onRerun, isLast, currentCtx = "", sessionId = "", isTuiActive = false, promptingForInput = false, onSearch, onPathClick }: { block: Block; modeActive?: boolean; isPinned?: boolean; isSelected?: boolean; onPinToggle?: (id: string) => void; onRerun: (cmd: string) => void; isLast?: boolean; currentCtx?: string; sessionId?: string; isTuiActive?: boolean; promptingForInput?: boolean; onSearch?: ((q: string) => void) | null; onPathClick?: (path: string) => void }) {
   const ok = block.code === 0;
   const failed = !block.pending && !ok;
   const [expanded, setExpandedRaw] = useState(true);
@@ -2802,6 +2802,30 @@ function BlockViewImpl({ block, modeActive = false, onRerun, isLast, currentCtx 
     window.addEventListener("block-toggle-collapse", onToggle);
     return () => window.removeEventListener("block-toggle-collapse", onToggle);
   }, [block.id, setExpanded]);
+
+  // Super-shift F: open inline find bar.
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const findInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const onFind = (e: Event) => {
+      if ((e as CustomEvent).detail?.blockId === block.id) {
+        setFindOpen(true);
+        setTimeout(() => findInputRef.current?.focus(), 0);
+      }
+    };
+    window.addEventListener("block-find-open", onFind);
+    return () => window.removeEventListener("block-find-open", onFind);
+  }, [block.id]);
+
+  // Super-shift P: toggle pin via onPinToggle callback.
+  useEffect(() => {
+    const onPin = (e: Event) => {
+      if ((e as CustomEvent).detail?.blockId === block.id) onPinToggle?.(block.id);
+    };
+    window.addEventListener("block-pin-toggle", onPin);
+    return () => window.removeEventListener("block-pin-toggle", onPin);
+  }, [block.id, onPinToggle]);
 
   useEffect(() => {
     if (!isLast) return;
@@ -2949,7 +2973,7 @@ function BlockViewImpl({ block, modeActive = false, onRerun, isLast, currentCtx 
   }, [isLast, isLong, block.pending]);
 
   return (
-    <article className={`rise group relative pl-9 transition-[background-color,padding,margin,border-radius] duration-150 ${failed ? "rounded-lg bg-alarm/5 py-2 pr-3 -mx-3" : ""}`}>
+    <article className={`rise group relative pl-9 transition-[background-color,padding,margin,border-radius] duration-150 ${failed ? "rounded-lg bg-alarm/5 py-2 pr-3 -mx-3" : ""} ${isSelected ? "rounded-lg ring-2 ring-signal/50 bg-signal/5 py-1 pr-2 -mx-2" : ""}`}>
       {/* icon center = top-[7px] + half of size = 11px, matching the timeline line at left-[11px] */}
       <div aria-hidden className="absolute left-[5px] top-[7px]">
         {block.pending
@@ -2979,10 +3003,38 @@ function BlockViewImpl({ block, modeActive = false, onRerun, isLast, currentCtx 
           </button>
         )}
         <span className="ml-auto flex items-center gap-3">
+          {isPinned && <PinIcon className="size-3 text-signal/70" aria-label="pinned" />}
           <BlockModeHints open={modeActive} collapsible={isLong ? (expanded ? "collapse" : "expand") : null} />
           <BlockMeta block={block} />
         </span>
       </header>
+      {/* Inline find bar */}
+      {findOpen && (
+        <div className="flex items-center gap-2 mt-1.5 mb-1 px-1 py-1 rounded-md bg-card border border-border">
+          <SearchIcon className="size-3 shrink-0 text-muted-foreground" />
+          <input
+            ref={findInputRef}
+            value={findQuery}
+            onChange={e => setFindQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === "Escape") { setFindOpen(false); setFindQuery(""); } }}
+            placeholder="Find in block…"
+            className="flex-1 bg-transparent font-mono text-[12px] text-foreground outline-none placeholder:text-muted-foreground/50"
+          />
+          {findQuery && (
+            <span className="font-mono text-[10px] text-muted-foreground shrink-0">
+              {(() => {
+                const text = `${block.input}\n${block.out.map(o => ("text" in o ? o.text : "")).join("\n")}`;
+                const q = findQuery.toLowerCase();
+                const count = (text.toLowerCase().match(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length;
+                return count > 0 ? `${count} match${count !== 1 ? "es" : ""}` : "no matches";
+              })()}
+            </span>
+          )}
+          <button onClick={() => { setFindOpen(false); setFindQuery(""); }} className="text-muted-foreground/60 hover:text-foreground">
+            <XIcon className="size-3" />
+          </button>
+        </div>
+      )}
       {/* Inline TUI: terminal mounted directly here for alt-screen apps (vim, htop, fzf).
           Inline it is a fixed-height viewport with its own scrollback. */}
       {isTuiActive && (

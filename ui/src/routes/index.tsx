@@ -234,6 +234,8 @@ function Daimon() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
   const [blockModActive, setBlockModActive] = useState(false);
+  const [pinnedBlockIds, setPinnedBlockIds] = useState<Set<string>>(new Set());
+  const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   // Open fullscreen pagers (git log / git diff) per pane id; "" = unscoped.
   const [pagerPanes, setPagerPanes] = useState<Record<string, number>>({});
@@ -936,13 +938,43 @@ function Daimon() {
           ? Math.max(0, idx - 1)
           : Math.min(blocks.length - 1, idx + 1);
         const id = blocks[next]?.id;
-        if (id) { kbdDrivenRef.current = true; setHoveredBlockId(id); }
+        if (id) {
+          kbdDrivenRef.current = true;
+          setHoveredBlockId(id);
+          blockRefsMap.current.get(id)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          // Extend selection when arrow key used while selection already active.
+          setSelectedBlockIds(prev => {
+            if (prev.size === 0 && cur) {
+              // Start range selection from current block.
+              const newSel = new Set(prev);
+              if (cur) newSel.add(cur);
+              newSel.add(id);
+              return newSel;
+            }
+            if (prev.size > 0) {
+              const newSel = new Set(prev);
+              newSel.add(id);
+              return newSel;
+            }
+            return prev;
+          });
+        }
         return;
       }
       // Enter: scroll to block, confirming selection (menu is already visible).
       if (e.key === "Enter" && hoveredBlockId) {
         e.preventDefault();
         blockRefsMap.current.get(hoveredBlockId)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        return;
+      }
+      // Space: toggle individual block selection.
+      if (e.key === " " && hoveredBlockId) {
+        e.preventDefault();
+        setSelectedBlockIds(prev => {
+          const next = new Set(prev);
+          if (next.has(hoveredBlockId)) next.delete(hoveredBlockId); else next.add(hoveredBlockId);
+          return next;
+        });
         return;
       }
       if (!hoveredBlockId) return;
@@ -966,12 +998,19 @@ function Daimon() {
       } else if (key === "E") {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("block-toggle-collapse", { detail: { blockId: block.id } }));
+      } else if (key === "F") {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("block-find-open", { detail: { blockId: block.id } }));
+      } else if (key === "P") {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("block-pin-toggle", { detail: { blockId: block.id } }));
       }
     };
     const onUp = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) {
         blockModRef.current = false;
         setBlockModActive(false);
+        setSelectedBlockIds(new Set());
         // Clear keyboard-driven selection when mod released.
         if (kbdDrivenRef.current) { kbdDrivenRef.current = false; setHoveredBlockId(null); }
       }
@@ -1205,6 +1244,28 @@ function Daimon() {
           onClick={() => { if (!isFocused) setFocusedPane(splitSessionId && paneSessionId === splitSessionId ? "right" : "left"); }}
         >
           <div className="w-full" data-follow-session={paneSessionId} ref={(el) => observeContent(paneSessionId, el)}>
+            {/* Pinned blocks strip */}
+            {pinnedBlockIds.size > 0 && (() => {
+              const pinned = pane.blocks.filter(b => pinnedBlockIds.has(b.id));
+              if (pinned.length === 0) return null;
+              return (
+                <div className="sticky top-0 z-10 border-b border-border/60 bg-card/90 backdrop-blur-sm px-4 py-2 space-y-2">
+                  <div className="font-mono text-[10px] text-muted-foreground/60 uppercase tracking-widest flex items-center gap-1.5">
+                    <span>Pinned</span>
+                  </div>
+                  {pinned.map(b => (
+                    <div key={b.id} className="text-[12px] font-mono text-foreground/80 flex items-center gap-2">
+                      <span className="text-muted-foreground/50">$</span>
+                      <span className="truncate">{b.input}</span>
+                      <button
+                        className="ml-auto text-muted-foreground/40 hover:text-muted-foreground"
+                        onClick={() => setPinnedBlockIds(prev => { const next = new Set(prev); next.delete(b.id); return next; })}
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
             {pane.blocks.length === 0 ? (
               <LandingPage
                 blocks={pane.blocks}
@@ -1225,7 +1286,7 @@ function Daimon() {
                     onMouseEnter={() => { if (!pagerActive) { kbdDrivenRef.current = false; setHoveredBlockId(b.id); } if (!isFocused) setFocusedPane(splitSessionId && paneSessionId === splitSessionId ? "right" : "left"); }}
                     onMouseLeave={() => setHoveredBlockId(null)}
                   >
-                    <BlockView block={b} modeActive={effectiveHoveredBlockId === b.id && effectiveBlockModActive} onRerun={(cmd) => submitRef.current(cmd, paneSessionId)} isLast={i === pane.blocks.length - 1} currentCtx={pane.state.ctx.name} sessionId={pane.id} isTuiActive={tuiBlockIds.get(pane.id) === b.id} promptingForInput={panePrompting && !!b.pending} onSearch={(q) => { setGlobalSearchQuery(q); setGlobalSearchOpen(true); }} onPathClick={(path) => { const expanded = path.startsWith("~") ? HOME + path.slice(1) : path; const hasExt = /\.[^/]+$/.test(expanded.split("/").pop() ?? ""); const dir = hasExt ? expanded.split("/").slice(0, -1).join("/") || "/" : expanded; submitRef.current("cd " + JSON.stringify(dir), paneSessionId); toast("cd " + dir, { duration: 2000 }); }} />
+                    <BlockView block={b} modeActive={effectiveHoveredBlockId === b.id && effectiveBlockModActive} isPinned={pinnedBlockIds.has(b.id)} isSelected={selectedBlockIds.has(b.id)} onPinToggle={(id) => setPinnedBlockIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; })} onRerun={(cmd) => submitRef.current(cmd, paneSessionId)} isLast={i === pane.blocks.length - 1} currentCtx={pane.state.ctx.name} sessionId={pane.id} isTuiActive={tuiBlockIds.get(pane.id) === b.id} promptingForInput={panePrompting && !!b.pending} onSearch={(q) => { setGlobalSearchQuery(q); setGlobalSearchOpen(true); }} onPathClick={(path) => { const expanded = path.startsWith("~") ? HOME + path.slice(1) : path; const hasExt = /\.[^/]+$/.test(expanded.split("/").pop() ?? ""); const dir = hasExt ? expanded.split("/").slice(0, -1).join("/") || "/" : expanded; submitRef.current("cd " + JSON.stringify(dir), paneSessionId); toast("cd " + dir, { duration: 2000 }); }} />
                   </div>
                 ))}
               </div>
