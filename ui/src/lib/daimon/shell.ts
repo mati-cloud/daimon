@@ -51,10 +51,10 @@ const INTERACTIVE_RE = /^\s*(scp|ipmitool|ipmi|kubectl\s+(exec|attach|debug)|oc\
 // Not erase-line (\x1b[2K): on its own that's a one-line progress redraw (vite, npm),
 // which normalizeTerminal replays in the block.
 const TUI_RE = /\x1b\[\?2004h|\x1b\[\d*A|\x1b\[\d*;\d*H|\x1b\[H\b|\x1b\[2J|\x1b\[3J|\x1b\[\?1000h|\x1b\[\?1049[lh]/;
-// Signals strong enough to trigger TUI mode with no prior output (erase screen, mouse, alt-screen).
-// Cursor-up alone (\x1b[A) is also used by fancy prompt themes on Ctrl+C, so it only counts
-// when the command has already produced some output (progress bars, spinners).
-const TUI_STRONG_RE = /\x1b\[\?2004h|\x1b\[\d*;\d*H|\x1b\[H\b|\x1b\[2J|\x1b\[3J|\x1b\[\?1000h|\x1b\[\?1049[lh]/;
+// Sequences that are unambiguously from a TUI program even with no prior output.
+// Prompt themes (p10k, starship) emit cursor-up/cursor-pos on Ctrl+C redraws; alt-screen
+// and mouse-enable are never emitted by prompt themes, so they're safe to trust immediately.
+const TUI_ALTMOUSE_RE = /\x1b\[\?2004h|\x1b\[\?1000h|\x1b\[\?1049[lh]/;
 
 // Terminal state changes that mean nothing in a text block: private mode set/reset,
 // cursor save/restore (ESC 7 / ESC 8) and scroll-region set/reset (CSI r). Full-screen
@@ -614,10 +614,10 @@ export async function run(
         if (!isDaimonified(tabId)) armDaimonifyInject();
         return;
       }
-      // Auto-detect TUI: strong signals fire immediately; cursor-up only counts after some output
-      // (fancy prompt themes emit cursor-up on Ctrl+C with no prior output — don't misdetect).
-      // Note: 1049h is stripped by daemon before forwarding; alt-screen is signaled via altScreenEnter event
-      if (!detectedTUI && (TUI_STRONG_RE.test(data) || (TUI_RE.test(data) && rawRun !== null && rawRun.length > 0))) {
+      // Auto-detect TUI: alt-screen/mouse-enable fire immediately (never from prompt themes);
+      // all other sequences (cursor-up, cursor-pos, erase) only count after some output exists,
+      // because fancy prompt themes (p10k, starship) emit those on Ctrl+C prompt redraws.
+      if (!detectedTUI && (TUI_ALTMOUSE_RE.test(data) || (TUI_RE.test(data) && rawRun !== null && rawRun.length > 0))) {
         detectedTUI = true;
         // Keep normalBuf — logs before the TUI/spinner phase are valid output to preserve
         notifyTui(tabId, true);
