@@ -113,23 +113,39 @@ function KeyCapture({ shortcutDesc, initial, onConfirm, onCancel }: {
 }) {
   const [combo, setCombo] = useState("");
   const [phase, setPhase] = useState<"waiting" | "captured">("waiting");
+  const divRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { divRef.current?.focus(); }, []);
+
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Escape cancels — don't let the modal's own Escape handler close the modal.
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        onCancelRef.current();
+        return;
+      }
       e.preventDefault();
-      e.stopPropagation();
+      e.stopImmediatePropagation();
       const c = eventToCombo(e);
       if (!c) return;
       setCombo(c);
       setPhase("captured");
     };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    // document capture fires before window capture — beats all other listeners.
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
   }, []);
 
   return (
     <div
-      className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-6 bg-card/97 backdrop-blur-sm rounded-r-[inherit]"
+      ref={divRef}
+      tabIndex={0}
+      className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-6 bg-card/97 backdrop-blur-sm rounded-r-[inherit] outline-none"
       onClick={e => e.stopPropagation()}
     >
       <span className="font-sans text-xs text-muted-foreground/60 uppercase tracking-widest">Remapping</span>
