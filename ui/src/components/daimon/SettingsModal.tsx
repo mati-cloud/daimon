@@ -114,6 +114,7 @@ function KeyCapture({ shortcutDesc, initial, onConfirm, onCancel }: {
 }) {
   const [combo, setCombo] = useState("");
   const [phase, setPhase] = useState<"waiting" | "captured">("waiting");
+  const [osWarning, setOsWarning] = useState(false);
   const divRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { divRef.current?.focus(); }, []);
@@ -135,6 +136,10 @@ function KeyCapture({ shortcutDesc, initial, onConfirm, onCancel }: {
       e.stopImmediatePropagation();
       const c = eventToCombo(e);
       if (!c) return;
+      // Warn about combos the OS intercepts before the browser sees them.
+      // These arrive only when the OS happens to pass them through (rare/partial).
+      const osIntercepted = /^(⌘ Space|⌘ ⇧ Space|⌘ Tab|⌘ ⇧ Tab|⌘ H|⌘ M|⌘ W|⌘ Q|Ctrl ↑|Ctrl ↓|Ctrl ←|Ctrl →|Ctrl Space|⌘ F3)$/.test(c);
+      setOsWarning(osIntercepted);
       setCombo(c);
       setPhase("captured");
     };
@@ -193,6 +198,12 @@ function KeyCapture({ shortcutDesc, initial, onConfirm, onCancel }: {
         )}
       </div>
 
+      {/* Actions */}
+      {osWarning && (
+        <div className="relative z-10 flex items-start gap-2 max-w-[18rem] rounded-lg border border-amber-500/30 bg-amber-500/8 px-3 py-2">
+          <span className="font-mono text-[10px] text-amber-400/80 leading-snug">This combo may be intercepted by the OS before daimon can receive it.</span>
+        </div>
+      )}
       {/* Actions */}
       <div className="relative flex items-center gap-2 z-10">
         <button
