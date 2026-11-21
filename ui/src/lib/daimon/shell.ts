@@ -478,6 +478,7 @@ export async function run(
   let lastOut: Out[] = [];
   let exitCode = 0;
   let finalCtx: ShellContext | null = null;
+  let sigintCleanupTimer: ReturnType<typeof setTimeout> | null = null;
   const id = Math.random().toString(36).slice(2);
 
   let detectedTUI = false;
@@ -622,6 +623,11 @@ export async function run(
       // all other sequences only count after some output exists. Also suppress for 1s after
       // Ctrl+C: zsh redraws prompt with cursor-pos/erase sequences that look like TUI startup.
       const recentInterrupt = (lastInterruptAt.get(tabId) ?? 0) > Date.now() - 1000;
+      // After Ctrl+C, zsh may suppress precmd (no OSC 133;A). Arm a short timer when we
+      // see PTY output following an interrupt — if onContext doesn't beat it, cleanup runs.
+      if (recentInterrupt && commandStarted && !done && !sigintCleanupTimer) {
+        sigintCleanupTimer = setTimeout(() => { sigintCleanupTimer = null; if (!done) cleanup(); }, 600);
+      }
       if (!detectedTUI && !recentInterrupt && (TUI_ALTMOUSE_RE.test(data) || (TUI_RE.test(data) && rawRun !== null && rawRun.length > 0))) {
         detectedTUI = true;
         // Keep normalBuf — logs before the TUI/spinner phase are valid output to preserve
@@ -636,9 +642,7 @@ export async function run(
       if (tid !== tabId) return;
       exitCode = code;
       // Interactive/TUI commands: remote shell never fires onContext, so resolve on exit.
-      // SIGINT (exit 130): zsh suppresses precmd after interrupt, so OSC 133;A never arrives.
-      // Resolve quickly so the first Ctrl+C cancels immediately without spamming.
-      if (isInteractive || isStreamingInteractive || detectedTUI || insideInteractiveSession || code === 130) {
+      if (isInteractive || isStreamingInteractive || detectedTUI || insideInteractiveSession) {
         tEnd ??= Date.now();
         // Give onContext a brief window to arrive first (local shell emits it quickly after exit)
         setTimeout(() => { if (!done) cleanup(); }, 300);
@@ -702,6 +706,7 @@ export async function run(
       if (progressFrame !== null) { cancelAnimationFrame(progressFrame); progressFrame = null; }
       if (daimonifyInjectTimer) { clearTimeout(daimonifyInjectTimer); daimonifyInjectTimer = null; }
       if (daimonifyRetryTimer) { clearTimeout(daimonifyRetryTimer); daimonifyRetryTimer = null; }
+      if (sigintCleanupTimer) { clearTimeout(sigintCleanupTimer); sigintCleanupTimer = null; }
       globalOutputOff?.(); globalOutputOff = null;
       globalContextOff?.(); globalContextOff = null;
       globalExitOff?.(); globalExitOff = null;
