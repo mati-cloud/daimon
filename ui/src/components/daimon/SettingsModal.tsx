@@ -148,7 +148,7 @@ function KeyCapture({ shortcutDesc, initial, onConfirm, onCancel }: {
       ref={divRef}
       tabIndex={0}
       data-key-lock-allow=""
-      className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-5 bg-background/90 backdrop-blur-lg rounded-r-[inherit] outline-none"
+      className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-5 bg-background/90 backdrop-blur-lg rounded-[inherit] outline-none"
       onClick={e => e.stopPropagation()}
     >
       {/* Subtle glow behind content */}
@@ -542,9 +542,20 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
     >
       <div
         data-state={open ? "open" : "closed"}
-        className="modal-panel w-[760px] h-[520px] bg-card/90 glass border border-border flex overflow-hidden shadow-2xl"
+        className="modal-panel w-[760px] h-[520px] bg-card/90 glass border border-border flex overflow-hidden shadow-2xl relative"
         onClick={(e) => e.stopPropagation()}
       >
+        {keymapCapturing && (
+          <KeyCapture
+            shortcutDesc={keymapCapturing.desc}
+            initial={keymapCapturing.current}
+            onConfirm={(combo) => {
+              setOverride(keymapCapturing.id, combo);
+              setKeymapCapturing(null);
+            }}
+            onCancel={() => setKeymapCapturing(null)}
+          />
+        )}
         {/* Sidebar */}
         <aside className="w-44 border-r border-border flex flex-col shrink-0">
           <div className="px-4 pt-4 pb-3 border-b border-border/50">
@@ -572,18 +583,7 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
         </aside>
 
         {/* Content */}
-        <div className="flex-1 flex flex-col overflow-hidden relative">
-          {keymapCapturing && (
-            <KeyCapture
-              shortcutDesc={keymapCapturing.desc}
-              initial={keymapCapturing.current}
-              onConfirm={(combo) => {
-                setOverride(keymapCapturing.id, combo);
-                setKeymapCapturing(null);
-              }}
-              onCancel={() => setKeymapCapturing(null)}
-            />
-          )}
+        <div className="flex-1 flex flex-col overflow-hidden">
           {/* Search */}
           <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
             <SearchIcon className="size-3.5 shrink-0 text-muted-foreground/50" />
