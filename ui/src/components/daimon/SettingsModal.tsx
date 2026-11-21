@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   PaletteIcon,
   TerminalIcon,
@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { Keys } from "./Kbd";
 import { GLASS_DEFAULT, GLASS_MIN_OPACITY, loadGlass, nativeBlurLabel, nativeBlurMode, saveGlass, type Glass } from "@/lib/daimon/appearance";
-import { getShortcuts } from "@/lib/daimon/keymaps";
+import { getShortcuts, setOverride, subscribeKeymaps, hasAnyConflict, type ResolvedShortcut } from "@/lib/daimon/keymaps";
 
 /** The Linux app's window is opaque (see app/src/bun/index.ts): Electrobun delivers no
  *  keyboard input to a see-through CEF window there. DAIMON_TRANSPARENT=1 opts in. */
@@ -88,29 +88,103 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
 }
 
 function KeymapsPanel() {
-  const shortcuts = getShortcuts();
+  const [shortcuts, setShortcuts] = useState<ResolvedShortcut[]>(() => getShortcuts());
+  // id -> draft value being typed (before commit)
+  const [drafts, setDrafts] = useState<Map<string, string>>(new Map());
+  // id currently being edited
+  const [editing, setEditing] = useState<string | null>(null);
+
+  // Re-read shortcuts when registry changes (another tab, plugin load, etc.)
+  useEffect(() => subscribeKeymaps(() => setShortcuts(getShortcuts())), []);
+
+  const startEdit = (id: string, current: string) => {
+    setEditing(id);
+    setDrafts(prev => new Map(prev).set(id, current));
+  };
+
+  const commitEdit = useCallback((id: string) => {
+    const draft = drafts.get(id);
+    if (draft !== undefined) {
+      setOverride(id, draft.trim());
+      setShortcuts(getShortcuts());
+    }
+    setEditing(null);
+  }, [drafts]);
+
+  const cancelEdit = (id: string) => {
+    setDrafts(prev => { const n = new Map(prev); n.delete(id); return n; });
+    setEditing(null);
+    setShortcuts(getShortcuts());
+  };
+
+  const onDraftChange = (id: string, value: string) => {
+    setDrafts(prev => new Map(prev).set(id, value));
+    // Live conflict preview while typing
+    setShortcuts(getShortcuts(id, value.trim()));
+  };
+
+  const anyConflict = shortcuts.some(s => s.conflict);
   const categories = Array.from(new Set(shortcuts.map(s => s.category)));
+
   return (
     <div>
+      {anyConflict && (
+        <div className="mx-4 mt-3 mb-1 flex items-start gap-2 rounded-md border border-alarm/40 bg-alarm/8 px-3 py-2.5">
+          <span className="font-mono text-[11px] font-semibold text-alarm leading-snug">
+            Shortcut conflict — resolve before daimon can process affected keys
+          </span>
+        </div>
+      )}
       {categories.map(cat => (
         <div key={cat}>
           <div className="px-4 pt-4 pb-1 font-mono text-[10px] text-muted-foreground/60 uppercase tracking-widest">{cat}</div>
-          {shortcuts.filter(s => s.category === cat).map(s => (
-            <div key={s.id} className={`flex items-center justify-between px-4 py-2 border-b border-border/30 ${s.conflict ? "bg-alarm/5" : ""}`}>
-              <div className="flex flex-col">
-                <span className="font-sans text-sm text-foreground/90">{s.description}</span>
-                {s.source === "plugin" && s.pluginName && (
-                  <span className="font-mono text-[10px] text-muted-foreground/50">plugin: {s.pluginName}</span>
-                )}
+          {shortcuts.filter(s => s.category === cat).map(s => {
+            const isEditing = editing === s.id;
+            const draft = drafts.get(s.id) ?? s.effectiveCombo;
+            return (
+              <div key={s.id} className={`flex items-center justify-between px-4 py-2 border-b border-border/30 ${s.conflict ? "bg-alarm/5" : ""}`}>
+                <div className="flex flex-col min-w-0 mr-3">
+                  <span className="font-sans text-sm text-foreground/90">{s.description}</span>
+                  {s.source === "plugin" && s.pluginName && (
+                    <span className="font-mono text-[10px] text-muted-foreground/50">plugin: {s.pluginName}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {s.conflict && (
+                    <span className="font-mono text-[10px] text-alarm bg-alarm/10 px-1.5 py-0.5 rounded">conflict</span>
+                  )}
+                  {s.overridden && !isEditing && (
+                    <button
+                      onClick={() => { setOverride(s.id, ""); setShortcuts(getShortcuts()); }}
+                      className="font-mono text-[10px] text-muted-foreground/50 hover:text-foreground"
+                      title="Reset to default"
+                    >reset</button>
+                  )}
+                  {isEditing ? (
+                    <input
+                      autoFocus
+                      value={draft}
+                      onChange={e => onDraftChange(s.id, e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") { e.preventDefault(); commitEdit(s.id); }
+                        if (e.key === "Escape") cancelEdit(s.id);
+                      }}
+                      onBlur={() => commitEdit(s.id)}
+                      className={`w-32 rounded border px-2 py-0.5 font-mono text-[12px] outline-none ${s.conflict ? "border-alarm text-alarm bg-alarm/5" : "border-signal/40 text-foreground bg-muted"}`}
+                    />
+                  ) : (
+                    <button
+                      onClick={() => startEdit(s.id, s.effectiveCombo)}
+                      title="Click to remap"
+                      className={`rounded border px-2 py-0.5 font-mono text-[12px] transition-colors hover:border-signal/60 ${s.conflict ? "border-alarm/60 bg-alarm/5 text-alarm" : s.overridden ? "border-signal/40 text-signal" : "border-border text-foreground/80"}`}
+                    >
+                      {s.effectiveCombo || <span className="text-muted-foreground/40 italic">none</span>}
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                {s.conflict && (
-                  <span className="font-mono text-[10px] text-alarm bg-alarm/10 px-1.5 py-0.5 rounded">conflict</span>
-                )}
-                <Keys combo={s.combo} size="md" />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ))}
     </div>
