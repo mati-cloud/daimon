@@ -308,7 +308,7 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { onClose(); return; }
+      if (e.key === "Escape") { if (!keymapCapturing) onClose(); return; }
       if (e.key === "/" && document.activeElement !== searchRef.current) {
         e.preventDefault();
         searchRef.current?.focus();
@@ -538,7 +538,7 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
     <div
       data-state={open ? "open" : "closed"}
       className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={keymapCapturing ? undefined : onClose}
     >
       <div
         data-state={open ? "open" : "closed"}
