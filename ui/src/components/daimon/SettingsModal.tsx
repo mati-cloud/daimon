@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { setKeyLock } from "@/lib/daimon/keyLock";
 import {
   PaletteIcon,
   TerminalIcon,
@@ -116,6 +117,7 @@ function KeyCapture({ shortcutDesc, initial, onConfirm, onCancel }: {
   const divRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { divRef.current?.focus(); }, []);
+  useEffect(() => { setKeyLock(true); return () => setKeyLock(false); }, []);
 
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
@@ -145,6 +147,7 @@ function KeyCapture({ shortcutDesc, initial, onConfirm, onCancel }: {
     <div
       ref={divRef}
       tabIndex={0}
+      data-key-lock-allow=""
       className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-5 bg-background/90 backdrop-blur-lg rounded-r-[inherit] outline-none"
       onClick={e => e.stopPropagation()}
     >
