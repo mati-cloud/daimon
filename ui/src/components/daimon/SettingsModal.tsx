@@ -145,77 +145,81 @@ function KeyCapture({ shortcutDesc, initial, onConfirm, onCancel }: {
     <div
       ref={divRef}
       tabIndex={0}
-      className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-6 bg-card/97 backdrop-blur-sm rounded-r-[inherit] outline-none"
+      className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-5 bg-background/90 backdrop-blur-lg rounded-r-[inherit] outline-none"
       onClick={e => e.stopPropagation()}
     >
-      <span className="font-sans text-xs text-muted-foreground/60 uppercase tracking-widest">Remapping</span>
-      <span className="font-sans text-base text-foreground/90 font-medium">{shortcutDesc}</span>
+      {/* Subtle glow behind content */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="w-48 h-48 rounded-full bg-signal/5 blur-3xl" />
+      </div>
+
+      <div className="relative flex flex-col items-center gap-1 text-center z-10">
+        <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-signal/50">Rebinding</span>
+        <span className="font-sans text-[17px] font-semibold text-foreground">{shortcutDesc}</span>
+        {initial && (
+          <span className="font-mono text-[10px] text-muted-foreground/35">was <span className="text-muted-foreground/50">{initial}</span></span>
+        )}
+      </div>
 
       {/* Key display */}
-      <div className="flex items-center justify-center min-h-[5rem]">
+      <div className="relative flex flex-col items-center justify-center gap-2.5 z-10 min-h-[5.5rem]">
         {phase === "waiting" ? (
-          <span className="font-mono text-muted-foreground/40 text-sm animate-pulse">press keys…</span>
+          <>
+            <div className="relative flex items-center justify-center w-10 h-10">
+              <div className="absolute inset-0 rounded-full border border-signal/20 animate-ping" style={{ animationDuration: "1.8s" }} />
+              <div className="absolute inset-0 rounded-full border border-signal/15" />
+              <svg className="w-4 h-4 text-signal/35" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="2" y="6" width="20" height="12" rx="2.5" />
+                <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h12" />
+              </svg>
+            </div>
+            <span className="font-mono text-[11px] text-muted-foreground/35">press your key combination</span>
+          </>
         ) : (
-          <span className="font-mono text-4xl font-bold tracking-widest text-foreground">
-            {combo.split(" ").map((k, i) => (
-              <span key={i}>
-                {i > 0 && <span className="text-muted-foreground/40 text-2xl mx-1">+</span>}
-                <kbd className="inline-flex items-center justify-center rounded-lg border-2 border-signal/60 bg-signal/10 px-3 py-1 text-signal">{k}</kbd>
-              </span>
-            ))}
-          </span>
+          <>
+            <div className="flex items-center gap-2">
+              {combo.split(" ").map((k, i) => (
+                <span key={i} className="flex items-center gap-2">
+                  {i > 0 && <span className="font-mono text-[11px] text-muted-foreground/30">+</span>}
+                  <kbd className="inline-flex items-center justify-center rounded-xl border border-signal/50 bg-signal/10 shadow-[0_0_20px_-6px_var(--color-signal),inset_0_1px_0_oklch(1_0_0_/_0.06)] px-4 py-2.5 font-mono text-[22px] font-semibold text-signal min-w-[3.25rem] leading-none">{k}</kbd>
+                </span>
+              ))}
+            </div>
+            <span className="font-mono text-[10px] text-muted-foreground/35">press again to change</span>
+          </>
         )}
       </div>
 
-      <div className="font-mono text-[11px] text-muted-foreground/50">
-        {phase === "captured" ? "press again to re-capture" : `current: ${initial || "none"}`}
-      </div>
-
-      <div className="flex items-center gap-3 mt-2">
+      {/* Actions */}
+      <div className="relative flex items-center gap-2 z-10">
         <button
           onClick={onCancel}
-          className="rounded border border-border px-4 py-1.5 font-mono text-[12px] text-muted-foreground hover:text-foreground transition-colors"
+          className="rounded-lg border border-border/50 px-5 py-1.5 font-mono text-[11px] text-muted-foreground/70 hover:text-foreground hover:border-border transition-colors"
         >Cancel</button>
-        {phase === "captured" && (
-          <button
-            onClick={() => onConfirm(combo)}
-            className="rounded border border-signal/60 bg-signal/10 px-4 py-1.5 font-mono text-[12px] text-signal hover:bg-signal/20 transition-colors"
-          >Confirm</button>
-        )}
+        <button
+          disabled={phase !== "captured"}
+          onClick={() => phase === "captured" && onConfirm(combo)}
+          className={`rounded-lg px-5 py-1.5 font-mono text-[11px] font-medium transition-all ${
+            phase === "captured"
+              ? "bg-signal text-background hover:brightness-110 shadow-[0_0_18px_-5px_var(--color-signal)]"
+              : "bg-signal/8 text-signal/20 cursor-not-allowed border border-signal/10"
+          }`}
+        >Confirm</button>
       </div>
     </div>
   );
 }
 
-function KeymapsPanel() {
+function KeymapsPanel({ onStartCapture }: { onStartCapture: (s: { id: string; desc: string; current: string }) => void }) {
   const [shortcuts, setShortcuts] = useState<ResolvedShortcut[]>(() => getShortcuts());
-  const [capturing, setCapturing] = useState<{ id: string; desc: string; current: string } | null>(null);
 
   useEffect(() => subscribeKeymaps(() => setShortcuts(getShortcuts())), []);
-
-  const startCapture = (s: ResolvedShortcut) =>
-    setCapturing({ id: s.id, desc: s.description, current: s.effectiveCombo });
-
-  const confirmCapture = (combo: string) => {
-    if (!capturing) return;
-    setOverride(capturing.id, combo);
-    setShortcuts(getShortcuts());
-    setCapturing(null);
-  };
 
   const anyConflict = shortcuts.some(s => s.conflict);
   const categories = Array.from(new Set(shortcuts.map(s => s.category)));
 
   return (
-    <div className="relative">
-      {capturing && (
-        <KeyCapture
-          shortcutDesc={capturing.desc}
-          initial={capturing.current}
-          onConfirm={confirmCapture}
-          onCancel={() => setCapturing(null)}
-        />
-      )}
+    <div>
       {anyConflict && (
         <div className="mx-4 mt-3 mb-1 flex items-start gap-2 rounded-md border border-alarm/40 bg-alarm/8 px-3 py-2.5">
           <span className="font-mono text-[11px] font-semibold text-alarm leading-snug">
@@ -246,7 +250,7 @@ function KeymapsPanel() {
                   >reset</button>
                 )}
                 <button
-                  onClick={() => startCapture(s)}
+                  onClick={() => onStartCapture({ id: s.id, desc: s.description, current: s.effectiveCombo })}
                   title="Click to remap"
                   className={`rounded border px-2 py-0.5 font-mono text-[12px] transition-colors hover:border-signal/60 ${s.conflict ? "border-alarm/60 bg-alarm/5 text-alarm" : s.overridden ? "border-signal/40 text-signal" : "border-border text-foreground/80"}`}
                 >
@@ -265,6 +269,7 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
   const shown = usePresence(open);   // stays mounted while it animates out
   const [category, setCategory] = useState<CategoryId>("appearance");
   const [search, setSearch] = useState("");
+  const [keymapCapturing, setKeymapCapturing] = useState<{ id: string; desc: string; current: string } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   // Pref state (loaded once on open)
@@ -564,7 +569,18 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
         </aside>
 
         {/* Content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden relative">
+          {keymapCapturing && (
+            <KeyCapture
+              shortcutDesc={keymapCapturing.desc}
+              initial={keymapCapturing.current}
+              onConfirm={(combo) => {
+                setOverride(keymapCapturing.id, combo);
+                setKeymapCapturing(null);
+              }}
+              onCancel={() => setKeymapCapturing(null)}
+            />
+          )}
           {/* Search */}
           <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
             <SearchIcon className="size-3.5 shrink-0 text-muted-foreground/50" />
@@ -596,7 +612,7 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
                 ))}
               </div>
             ) : category === "keymaps" && !showingSearch ? (
-              <KeymapsPanel />
+              <KeymapsPanel onStartCapture={setKeymapCapturing} />
             ) : category === "about" && !showingSearch ? (
               <div className="px-4 py-6">
                 <p className="font-sans text-sm text-foreground/80">daimon v0.1.0 — a terminal for developers</p>
