@@ -50,11 +50,11 @@ const INTERACTIVE_RE = /^\s*(scp|ipmitool|ipmi|kubectl\s+(exec|attach|debug)|oc\
 // prompt marker, so mid-command it can only come from a program wanting keystrokes.
 // Not erase-line (\x1b[2K): on its own that's a one-line progress redraw (vite, npm),
 // which normalizeTerminal replays in the block.
-const TUI_RE = /\x1b\[\?2004h|\x1b\[\d*A|\x1b\[\d*;\d*H|\x1b\[H\b|\x1b\[2J|\x1b\[3J|\x1b\[\?1000h|\x1b\[\?1049[lh]/;
-// Sequences that are unambiguously from a TUI program even with no prior output.
-// Prompt themes (p10k, starship) emit cursor-up/cursor-pos on Ctrl+C redraws; alt-screen
-// and mouse-enable are never emitted by prompt themes, so they're safe to trust immediately.
-const TUI_ALTMOUSE_RE = /\x1b\[\?2004h|\x1b\[\?1000h|\x1b\[\?1049[lh]/;
+const TUI_RE = /\x1b\[\d*A|\x1b\[\d*;\d*H|\x1b\[H\b|\x1b\[2J|\x1b\[3J|\x1b\[\?1000h|\x1b\[\?1049[lh]/;
+// Sequences unambiguously from a TUI program even with no prior output.
+// ?1049h/l = alt-screen, ?1000h = mouse tracking — prompt themes never emit these.
+// ?2004h = bracketed-paste: zsh re-enables it on every prompt redraw, so excluded.
+const TUI_ALTMOUSE_RE = /\x1b\[\?1000h|\x1b\[\?1049[lh]/;
 
 // Terminal state changes that mean nothing in a text block: private mode set/reset,
 // cursor save/restore (ESC 7 / ESC 8) and scroll-region set/reset (CSI r). Full-screen
@@ -65,6 +65,9 @@ const PTY_STATE_RE = /\x1b\[\?[0-9;]*[hlsur]|\x1b[78]|\x1b\[[0-9;]*r/g;
 const inAltScreenMap = new Map<string, boolean>();
 function isAltScreen(tabId: string) { return inAltScreenMap.get(tabId) ?? false; }
 export function getAltScreen(tabId: string) { return inAltScreenMap.get(tabId) ?? false; }
+// Timestamp of the last Ctrl+C sent to a tab; used to suppress false TUI detection from
+// prompt redraws that follow an interrupt (zsh re-enables bracketed-paste, redraws with cursor-pos).
+const lastInterruptAt = new Map<string, number>();
 // Programs like nano and less redraw on SIGWINCH by leaving and re-entering the alt screen
 // (1049l + 1049h back to back). Taken literally, the exit unmounts the inline terminal and the
 // enter mounts a fresh one, whose fit resizes the PTY again: an endless remount loop. So an
@@ -306,6 +309,7 @@ export function takeRedraw(tabId: string): boolean {
 }
 
 export function sendRaw(tabId: string, data: string) {
+  if (data === "\x03") lastInterruptAt.set(tabId, Date.now());
   shell.write(tabId, data).catch(() => {});
 }
 
@@ -615,9 +619,10 @@ export async function run(
         return;
       }
       // Auto-detect TUI: alt-screen/mouse-enable fire immediately (never from prompt themes);
-      // all other sequences (cursor-up, cursor-pos, erase) only count after some output exists,
-      // because fancy prompt themes (p10k, starship) emit those on Ctrl+C prompt redraws.
-      if (!detectedTUI && (TUI_ALTMOUSE_RE.test(data) || (TUI_RE.test(data) && rawRun !== null && rawRun.length > 0))) {
+      // all other sequences only count after some output exists. Also suppress for 1s after
+      // Ctrl+C: zsh redraws prompt with cursor-pos/erase sequences that look like TUI startup.
+      const recentInterrupt = (lastInterruptAt.get(tabId) ?? 0) > Date.now() - 1000;
+      if (!detectedTUI && !recentInterrupt && (TUI_ALTMOUSE_RE.test(data) || (TUI_RE.test(data) && rawRun !== null && rawRun.length > 0))) {
         detectedTUI = true;
         // Keep normalBuf — logs before the TUI/spinner phase are valid output to preserve
         notifyTui(tabId, true);
