@@ -1,60 +1,28 @@
-import "./linuxEnv"; // first: sets WebKitGTK env vars before electrobun loads
 import { BrowserWindow, ApplicationMenu } from "electrobun/bun";
 import { openExternal } from "electrobun/bun/utils";
 import { connectDaemon } from "./daemon";
 import { appLog, appWarn } from "./appLog";
-import {
-  attachVariableBlur, backdropForBlur, loadVariableBlur, prepareWindow, setBackdrop, setVariableBlur,
-  type BackdropKind,
-} from "./winBackdrop";
 import { enablePinchZoom } from "./macMagnification";
 import { setupNativeDrag } from "./macWindowDrag";
 import { setMinSize } from "./windowMinSize";
 import { describeFocus, isForeground } from "./winFocus";
 import { focusLog } from "./focusLog";
-import { prepareCustomFrame, startTopResize } from "./winFrame";
-import { setWindowIcon } from "./winIcon";
+import { setKeyInterceptLock, requestAccessibilityPermission, hasAccessibilityPermission } from "./keyIntercept";
 import { startUpdater, type UpdateState } from "./updater";
-import { startLinuxResize, type ResizeEdge } from "./linuxX11";
-import { resolve } from "node:path";
 import { homedir } from "node:os";
 
 // ── pty-daemon ────────────────────────────────────────────────────────────────
-// Dev: dev.sh runs it. Prod: find the running daemon or start one (see daemon.ts).
 const isDev = process.env.NODE_ENV !== "production";
 const daemon = await connectDaemon(isDev);
 
-// Native see-through windows: macOS and Windows (WebView2 + DWM, which also gives real
-// desktop blur — see winBackdrop.ts). DAIMON_TRANSPARENT=0 makes them opaque.
-// Linux is opaque unless DAIMON_TRANSPARENT=1: Electrobun (2.0.6) renders a see-through CEF
-// window off-screen and then delivers no keyboard input to the page at all. Blur is off on
-// Linux in any case: compositors blur behind a window at most on/off with their own global
-// strength (KWin), or not at all (GNOME's Mutter) — never at a radius the app chooses.
-const isWindows = process.platform === "win32";
-const isLinux = process.platform === "linux";
-// Windows and Linux: no system title bar — the page draws the caption (drag strip and
-// minimize / maximize / close, TitleBar.tsx). macOS keeps its native traffic lights.
-const customFrame = isWindows || isLinux;
-const nativeTransparent = isLinux
-  ? process.env.DAIMON_TRANSPARENT === "1"
-  : process.env.DAIMON_TRANSPARENT !== "0";
+const nativeTransparent = process.env.DAIMON_TRANSPARENT !== "0";
 
 const baseUrl = isDev ? "http://localhost:7881" : "views://daimon2/index.html";
-// ?blur= tells the UI the compositor blurs the desktop behind the window, and how the
-// blur slider behaves: "variable" = any radius (helper DLL), "steps" = DWM's three looks,
-// "none" = no blur here (Linux): the setting is disabled. DAIMON_BACKDROP pins a DWM look.
-const variableBlur = nativeTransparent && isWindows && !process.env.DAIMON_BACKDROP && loadVariableBlur();
 const query = [
   daemon && `daimon_token=${daemon.token}`,
   daemon && `daimon_port=${daemon.port}`,
-  // The UI's ~ shortening; its build-time HOME is the CI runner's.
   `home=${encodeURIComponent(homedir())}`,
   nativeTransparent && "transparent=1",
-  nativeTransparent && isWindows && (variableBlur ? "blur=variable" : "blur=steps"),
-  nativeTransparent && isLinux && "blur=none",
-  // The page draws the title bar (drag strip + minimize / maximize / close): TitleBar.tsx.
-  customFrame && "frame=custom",
-  // Benchmark mode: the UI runs these commands and records timings (see ui/src/lib/daimon/bench.ts).
   process.env.DAIMON_BENCH && `bench=${encodeURIComponent(process.env.DAIMON_BENCH)}`,
 ].filter(Boolean);
 const frontendUrl = query.length ? `${baseUrl}?${query.join("&")}` : baseUrl;
@@ -106,62 +74,31 @@ const win = new BrowserWindow({
   title: "daimon",
   url: frontendUrl,
   frame: { width: 1280, height: 800, x: 100, y: 100 },
-  // See-through window where supported; the UI paints its own translucent background.
   transparent: nativeTransparent,
-  // Custom HTML titlebar: hide the native title bar. macOS keeps its traffic lights
-  // inset; Windows keeps the resizable frame and the page draws the window buttons.
-  // Linux (CEF): only "hidden" drops the GTK title bar, and with it the resize borders —
-  // the page's edge strips resize through linuxX11.ts.
-  ...((process.platform === "darwin" || isWindows) && { titleBarStyle: "hiddenInset" as const }),
-  ...(process.platform === "linux" && { titleBarStyle: "hidden" as const }),
-  ...(process.platform === "darwin" && { trafficLightOffset: { x: 16, y: 14 } }),
+  titleBarStyle: "hiddenInset" as const,
+  trafficLightOffset: { x: 16, y: 14 },
 });
 
-if (isWindows && !setWindowIcon(win.ptr, resolve(import.meta.dir, "../icon.ico"))) {
-  console.warn("[main] couldn't set the window icon");
-}
-
-enablePinchZoom(); // macOS only
-setupNativeDrag(win); // macOS only — native drag via performWindowDragWithEvent
+enablePinchZoom();
+setupNativeDrag(win);
 setMinSize(win);
 
-// Window re-activated (un-minimize, alt-tab / click back from another app) or (un)maximized:
-// tell the page, so it can put the cursor back in the command input.
-//
-// How the page gets keyboard focus on Windows (traced with the focus log, see focusLog.ts):
-// WebView2 tracks focus through its controller, so a raw Win32 SetFocus on its input window
-// leaves document.hasFocus() false. Electrobun's activateWindow does give the page focus
-// (a real `focus` event follows) — but every call blurs and refocuses the page, so it is only
-// done when the page asks for it ({ type: "window", action: "focus" }), i.e. when it is
-// visible, wants the command input focused and finds document.hasFocus() false.
-//
-// On un-minimize Windows reports activation while the window is still iconic and only then
-// plays the restore animation, so wait until the window is really in front before telling
-// the page.
+// Request Accessibility permission on first launch (needed for CGEventTap keyboard suppression).
+// Shows macOS system prompt if not already granted; silently no-ops if it is.
+if (!hasAccessibilityPermission()) requestAccessibilityPermission();
+
 const HOST_FOCUS_JS = `window.dispatchEvent(new Event("daimon:host-focus"))`;
 let focusTimer: ReturnType<typeof setTimeout> | null = null;
 function returnFocusToPage(why: string) {
   if (focusTimer) clearTimeout(focusTimer);
   focusLog("host", `return focus (${why}) ${describeFocus(win.ptr)}`);
-  if (!isWindows) {
-    focusTimer = setTimeout(() => { focusTimer = null; win.webview.executeJavascript(HOST_FOCUS_JS); }, 30);
-    return;
-  }
-  const start = Date.now();
-  const poll = () => {
-    focusTimer = null;
-    const ready = isForeground(win.ptr);
-    if (!ready && Date.now() - start < 1500) { focusTimer = setTimeout(poll, 50); return; }
-    focusLog("host", `  ${ready ? "in front" : "gave up waiting"} after ${Date.now() - start}ms → tell page; ${describeFocus(win.ptr)}`);
-    if (ready) win.webview.executeJavascript(HOST_FOCUS_JS);
-  };
-  poll();
+  focusTimer = setTimeout(() => { focusTimer = null; win.webview.executeJavascript(HOST_FOCUS_JS); }, 30);
 }
 win.on("focus", () => returnFocusToPage("native focus"));
 win.on("blur", () => focusLog("host", `native blur ${describeFocus(win.ptr)}`));
 
 // Messages from the page: window.__electrobunSendToHost({ type, ... }).
-type HostMessage = { type?: string; blur?: unknown; action?: unknown; msg?: unknown; edge?: unknown; text?: unknown };
+type HostMessage = { type?: string; blur?: unknown; action?: unknown; msg?: unknown; text?: unknown; on?: unknown };
 const hostMessageHandlers: ((msg: HostMessage) => void)[] = [];
 (win.webview as unknown as { on(name: string, handler: (event: unknown) => void): void }).on(
   "host-message",
@@ -170,124 +107,35 @@ const hostMessageHandlers: ((msg: HostMessage) => void)[] = [];
     if (msg) for (const handle of hostMessageHandlers) handle(msg);
   },
 );
-// A program's copy (OSC 52, see ui/src/lib/daimon/tuiTerminal.ts): written natively, since
-// the page may only write the clipboard during a click or key press and an OSC 52 copy
-// arrives with program output, after it.
+
+// OSC 52 clipboard write from a TUI program (see ui/src/lib/daimon/tuiTerminal.ts).
 hostMessageHandlers.push((msg) => {
   if (msg.type !== "clipboard" || typeof msg.text !== "string") return;
-  const cmd =
-    process.platform === "darwin" ? ["pbcopy"]
-    : isWindows ? ["powershell.exe", "-NoProfile", "-Command", "Set-Clipboard -Value ([Console]::In.ReadToEnd())"]
-    : process.env.WAYLAND_DISPLAY ? ["wl-copy"]
-    : ["xclip", "-selection", "clipboard"];
   try {
-    const p = Bun.spawn(cmd, { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
+    const p = Bun.spawn(["pbcopy"], { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
     p.stdin.write(msg.text);
     p.stdin.end();
   } catch (err) {
-    appWarn(`[main] clipboard write (${cmd[0]}) failed: ${String(err)}`);
+    appWarn(`[main] clipboard write (pbcopy) failed: ${String(err)}`);
   }
 });
-// The last session's shell exited: close the window (the app exits with its last window).
+
 hostMessageHandlers.push((msg) => {
   if (msg.type === "quit") win.close();
 });
-// The page's half of the focus log.
+
 hostMessageHandlers.push((msg) => {
   if (msg.type === "focus-log" && typeof msg.msg === "string") focusLog("page", msg.msg);
 });
 
-// Windows and Linux: the page's title bar. Its buttons arrive as { type: "window", action },
-// and it is told when the window is (un)maximized so it can swap the maximize/restore icon.
-if (customFrame) {
-  if (isWindows && !prepareCustomFrame(win.ptr, nativeTransparent)) console.warn("[main] couldn't set up the custom window frame");
-  let maximized: boolean | null = null;
-  const reportState = (force = false) => {
-    const now = win.isMaximized();
-    if (!force && now === maximized) return;
-    // (Un)maximizing from the caption (double-click, snap) leaves keyboard focus on the frame
-    // window without a new `focus` event: hand it back to the page. Not on the first report.
-    focusLog("host", `window state: maximized ${maximized} → ${now}${force ? " (asked)" : ""}`);
-    if (maximized !== null && now !== maximized) returnFocusToPage("maximized changed");
-    maximized = now;
-    win.webview.executeJavascript(
-      `window.dispatchEvent(new CustomEvent("daimon:window-state", { detail: { maximized: ${now} } }))`,
-    );
-  };
-  win.on("resize", () => { focusLog("host", `native resize ${describeFocus(win.ptr)}`); reportState(); });
-  hostMessageHandlers.push((msg) => {
-    if (msg.type !== "window") return;
-    if (msg.action !== "state") focusLog("host", `title bar: ${String(msg.action)}`);
-    switch (msg.action) {
-      case "minimize": win.minimize(); break;
-      case "maximize": if (win.isMaximized()) win.unmaximize(); else win.maximize(); break;
-      case "focus": {
-        // The page wants keyboard focus (see returnFocusToPage). Windows only (WebView2's
-        // focus tracking); never steal it from another app.
-        if (!isWindows) break;
-        const front = isForeground(win.ptr);
-        focusLog("host", `page asks for focus → ${front ? "activate" : "not in front, ignored"}`);
-        if (front) win.activate();
-        break;
-      }
-      case "close": win.close(); break;
-      case "resize-top": if (isWindows) startTopResize(win.ptr); break;
-      // Linux: the page's edge strips (the undecorated window has no resize borders).
-      case "resize":
-        if (process.platform === "linux" && typeof msg.edge === "string" && !startLinuxResize(msg.edge as ResizeEdge)) {
-          appWarn("[main] couldn't start the window resize");
-        }
-        break;
-      case "state": reportState(true); break;
-    }
-  });
-}
-
-// Windows: blur the desktop behind the window. The UI reports the blur slider
-// as { type: "glass", blur }.
-appLog("[main] windows:", isWindows, "transparent:", nativeTransparent, "variable blur helper:", !!variableBlur, "forced backdrop:", process.env.DAIMON_BACKDROP ?? "-");
-if (isWindows && nativeTransparent) {
-  const hwnd = win.ptr;
-  if (prepareWindow(hwnd)) {
-    const DEFAULT_BLUR = 24; // until the UI reports the saved setting
-    const forced = process.env.DAIMON_BACKDROP as BackdropKind | undefined;
-    let apply: (blurPx: number) => void;
-
-    if (variableBlur && attachVariableBlur(hwnd)) {
-      setBackdrop(hwnd, "none"); // the helper's layer replaces DWM's own blur
-      let current = -1;
-      apply = (blurPx) => {
-        if (blurPx !== current && setVariableBlur(hwnd, blurPx)) current = blurPx;
-      };
-      appLog("[main] desktop blur: variable radius");
-    } else {
-      let current: BackdropKind | null = null;
-      apply = (blurPx) => {
-        const kind = forced ?? backdropForBlur(blurPx);
-        if (kind === current) return;
-        if (setBackdrop(hwnd, kind)) { current = kind; appLog("[main] desktop backdrop →", kind); }
-        else appWarn("[main] backdrop", kind, "was not applied");
-      };
-    }
-
-    // DAIMON_BLUR=<px> pins the blur radius and ignores the slider (handy for comparing).
-    const pinned = process.env.DAIMON_BLUR ? Number(process.env.DAIMON_BLUR) : NaN;
-    apply(Number.isFinite(pinned) ? pinned : DEFAULT_BLUR);
-    hostMessageHandlers.push((msg) => {
-      if (!Number.isFinite(pinned) && msg.type === "glass" && typeof msg.blur === "number") apply(msg.blur);
-    });
-  } else {
-    appWarn("[main] couldn't get a usable window handle — desktop blur disabled");
-  }
-}
-
+// System-wide keyboard suppression during keymap capture.
+hostMessageHandlers.push((msg) => {
+  if (msg.type === "keymap-lock" && typeof msg.on === "boolean") setKeyInterceptLock(msg.on);
+});
 
 console.log("[main] window opened →", frontendUrl.replace(/daimon_token=[^&]+/, "daimon_token=…"));
 
-// Auto-update (see updater.ts). The page shows the state from `daimon:update` events and
-// sends { type: "update", action: "state" } on load (it may miss earlier events),
-// { type: "update", action: "apply" } from its restart button and
-// { type: "update", action: "check" } from the command palette, answered with `daimon:update-check`.
+// Auto-update (see updater.ts).
 const updater = startUpdater(isDev, (state) => sendUpdateState(state));
 function sendUpdateState(state: UpdateState) {
   win.webview.executeJavascript(
@@ -305,14 +153,11 @@ hostMessageHandlers.push((msg) => {
   }
 });
 
-// Open a URL in the system default browser via Electrobun's native API.
 hostMessageHandlers.push((msg) => {
   if (msg.type !== "openUrl" || typeof (msg as { url?: unknown }).url !== "string") return;
   const url = (msg as { url: string }).url;
   try {
-    if (url.startsWith("https://") || url.startsWith("http://")) {
-      openExternal(url);
-    }
+    if (url.startsWith("https://") || url.startsWith("http://")) openExternal(url);
   } catch (e) {
     console.error("[main] openUrl error:", e);
   }

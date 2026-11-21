@@ -297,6 +297,11 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
   const setGlass = (patch: Partial<Glass>) => setGlassState((g) => { const n = { ...g, ...patch }; saveGlass(n); return n; });
 
   useEffect(() => {
+    (window as unknown as { __electrobunSendToHost?: (m: unknown) => void })
+      .__electrobunSendToHost?.({ type: "keymap-lock", on: keymapCapturing !== null });
+  }, [keymapCapturing]);
+
+  useEffect(() => {
     if (!open) return;
     setSearch("");
     setTimeout(() => searchRef.current?.focus(), 50);
