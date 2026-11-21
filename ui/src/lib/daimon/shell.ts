@@ -479,6 +479,7 @@ export async function run(
   let exitCode = 0;
   let finalCtx: ShellContext | null = null;
   let sigintCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+  let startupPromptSeen = false;
   const id = Math.random().toString(36).slice(2);
 
   let detectedTUI = false;
@@ -681,7 +682,13 @@ export async function run(
       // is over — remote `exit`, or the connection dropped (then the remote never sent its
       // command-start marker). End the session, and this command with the local context.
       const sshEnded = remoteRun && !ctx.ssh;
-      if (!commandStarted && !sshEnded) return; // ignore startup precmd prompt — wait for real command
+      // Drop at most ONE pre-command prompt (shell startup prompt arrives before OSC 133;C).
+      // After that, any onContext is the post-command prompt — resolve even if commandStarted
+      // missed OSC 133;C due to a timing race between runCommand subscription and the daemon.
+      if (!commandStarted && !sshEnded) {
+        if (startupPromptSeen) { /* second prompt with commandStarted=false → post-command, fall through */ }
+        else { startupPromptSeen = true; return; }
+      }
       finalCtx = ctx;
       // Stop buffering immediately — the prompt line arrives after context and
       // would pollute normalBuf, causing parse() to produce different output than
