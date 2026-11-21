@@ -95,7 +95,9 @@ export function Composer({
     const el = inputRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = el.scrollHeight + "px";
+    const MAX_H = 24 * 6; // 6 lines × 24px line-height
+    el.style.height = Math.min(el.scrollHeight, MAX_H) + "px";
+    el.style.overflowY = el.scrollHeight > MAX_H ? "auto" : "hidden";
   };
 
   useEffect(() => {
@@ -458,8 +460,8 @@ export function Composer({
               : promptingForInput ? "answer, Enter to send"
               : "running… type to send input, Ctrl+C to interrupt"
             }
-            className={`relative w-full resize-none overflow-hidden bg-transparent font-mono text-[14px] leading-6 text-foreground [caret-color:var(--color-foreground)] outline-none placeholder:text-muted-foreground/40 ${secretInput ? "[-webkit-text-security:disc]" : ""}`}
-            style={{ height: "1.5rem" }}
+            className={`relative w-full resize-none bg-transparent font-mono text-[14px] leading-6 text-foreground [caret-color:var(--color-foreground)] outline-none placeholder:text-muted-foreground/40 ${secretInput ? "[-webkit-text-security:disc]" : ""}`}
+            style={{ height: "1.5rem", overflowY: "hidden", minHeight: "1.5rem" }}
           />
         </div>
       </div>
