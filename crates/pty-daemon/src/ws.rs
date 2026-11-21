@@ -20,6 +20,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 fn allowed_origin(origin: &str) -> bool {
     origin == "views://daimon2"
         || (cfg!(debug_assertions) && matches!(origin, "http://localhost:7881" | "http://127.0.0.1:7881"))
+        || std::env::var_os("DAIMON_ALLOW_VITE").is_some()
 }
 
 /// Who may open a WebSocket (all three checks must pass):

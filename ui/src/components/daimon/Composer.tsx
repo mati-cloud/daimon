@@ -269,6 +269,8 @@ export function Composer({
     if (disabled) {
       if (e.ctrlKey && e.key === "c") {
         e.preventDefault();
+        e.stopPropagation();
+        e.nativeEvent.stopImmediatePropagation();
         onSubmit("\x03");
         setInputValue("");
         return;

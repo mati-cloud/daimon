@@ -68,6 +68,9 @@ export function getAltScreen(tabId: string) { return inAltScreenMap.get(tabId) ?
 // Timestamp of the last Ctrl+C sent to a tab; used to suppress false TUI detection from
 // prompt redraws that follow an interrupt (zsh re-enables bracketed-paste, redraws with cursor-pos).
 const lastInterruptAt = new Map<string, number>();
+// Callback registered by the active runCommand closure — called immediately when Ctrl+C is sent
+// so the sigint cleanup timer can be armed without waiting for PTY echo output.
+const interruptCallbackMap = new Map<string, () => void>();
 // Programs like nano and less redraw on SIGWINCH by leaving and re-entering the alt screen
 // (1049l + 1049h back to back). Taken literally, the exit unmounts the inline terminal and the
 // enter mounts a fresh one, whose fit resizes the PTY again: an endless remount loop. So an
@@ -309,7 +312,10 @@ export function takeRedraw(tabId: string): boolean {
 }
 
 export function sendRaw(tabId: string, data: string) {
-  if (data === "\x03") lastInterruptAt.set(tabId, Date.now());
+  if (data === "\x03") {
+    lastInterruptAt.set(tabId, Date.now());
+    interruptCallbackMap.get(tabId)?.();
+  }
   shell.write(tabId, data).catch(() => {});
 }
 
@@ -601,6 +607,13 @@ export async function run(
   return new Promise<RunResult>((resolve) => {
     globalOutputOff?.(); globalContextOff?.(); globalExitOff?.(); globalCommandStartOff?.();
 
+    // Arm the sigint cleanup timer immediately when Ctrl+C is sent — don't wait for PTY echo.
+    interruptCallbackMap.set(tabId, () => {
+      if (!done && !sigintCleanupTimer) {
+        sigintCleanupTimer = setTimeout(() => { sigintCleanupTimer = null; if (!done) cleanup({ cancelled: true }); }, 600);
+      }
+    });
+
     globalOutputOff = shell.onOutput((tid, data) => {
       if (tid !== tabId) return;
       if (!commandWritten) return; // discard pre-command PTY noise
@@ -708,6 +721,7 @@ export async function run(
       const cancelled = opts?.cancelled === true;
       if (done) return;
       done = true;
+      interruptCallbackMap.delete(tabId);
       activeCleanups.delete(tabId);
       if (progressTimer) { clearTimeout(progressTimer); progressTimer = null; }
       if (progressFrame !== null) { cancelAnimationFrame(progressFrame); progressFrame = null; }
