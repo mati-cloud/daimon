@@ -479,7 +479,6 @@ export async function run(
   let exitCode = 0;
   let finalCtx: ShellContext | null = null;
   let sigintCleanupTimer: ReturnType<typeof setTimeout> | null = null;
-  let startupPromptSeen = false;
   const id = Math.random().toString(36).slice(2);
 
   let detectedTUI = false;
@@ -610,7 +609,7 @@ export async function run(
       // Must be checked before the commandStarted gate (startup-prompt race can leave it false).
       const recentInterrupt = (lastInterruptAt.get(tabId) ?? 0) > Date.now() - 1000;
       if (recentInterrupt && !done && !sigintCleanupTimer) {
-        sigintCleanupTimer = setTimeout(() => { sigintCleanupTimer = null; if (!done) cleanup(); }, 600);
+        sigintCleanupTimer = setTimeout(() => { sigintCleanupTimer = null; if (!done) cleanup({ cancelled: true }); }, 600);
       }
       if (!commandStarted && !isInteractive && !isStreamingInteractive && !resume) return; // discard shell echo before OSC 133;C
       if (isAltScreen(tabId)) { sawAltScreen = true; return; }
@@ -682,12 +681,12 @@ export async function run(
       // is over — remote `exit`, or the connection dropped (then the remote never sent its
       // command-start marker). End the session, and this command with the local context.
       const sshEnded = remoteRun && !ctx.ssh;
-      // Drop at most ONE pre-command prompt (shell startup prompt arrives before OSC 133;C).
-      // After that, any onContext is the post-command prompt — resolve even if commandStarted
-      // missed OSC 133;C due to a timing race between runCommand subscription and the daemon.
-      if (!commandStarted && !sshEnded) {
-        if (startupPromptSeen) { /* second prompt with commandStarted=false → post-command, fall through */ }
-        else { startupPromptSeen = true; return; }
+      // After Ctrl+C, zsh suppresses precmd so OSC 133;C never fires — commandStarted stays
+      // false. Allow resolution if an interrupt happened recently (within 1s).
+      const recentInterruptNow = (lastInterruptAt.get(tabId) ?? 0) > Date.now() - 1000;
+      if (!commandStarted && !sshEnded && !recentInterruptNow) {
+        // Drop startup prompts that arrive before OSC 133;C (shell init race).
+        return;
       }
       finalCtx = ctx;
       // Stop buffering immediately — the prompt line arrives after context and
