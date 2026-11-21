@@ -28,9 +28,7 @@ function loadCF() {
       CFMachPortCreateRunLoopSource: { args: [P, P, FFIType.i32], returns: P },
       CFRunLoopGetMain:              { args: [], returns: P },
       CFRunLoopAddSource:            { args: [P, P, P], returns: FFIType.void },
-      // kCFRunLoopCommonModes is a global CFStringRef — declared as a 0-arg function
-      // so bun:ffi resolves the symbol; calling it reads the pointer at that address.
-      kCFRunLoopCommonModes:         { args: [], returns: P },
+      CFStringCreateWithCString:     { args: [P, P, FFIType.u32], returns: P },
     },
   ).symbols;
 }
@@ -117,9 +115,10 @@ function installTap(): boolean {
 
     const rl  = cf.CFRunLoopGetMain();
     const src = cf.CFMachPortCreateRunLoopSource(null, tapPort, 0);
-    // kCFRunLoopCommonModes is a global symbol — call it as a getter to read the pointer.
-    const commonModes = cf.kCFRunLoopCommonModes() as Id;
-    cf.CFRunLoopAddSource(rl, src, commonModes);
+    // kCFRunLoopDefaultMode = CFSTR("kCFRunLoopDefaultMode") — CF accepts the string directly.
+    // kCFStringEncodingUTF8 = 0x08000100
+    const defaultMode = cf.CFStringCreateWithCString(null, ptr(Buffer.from("kCFRunLoopDefaultMode\0")), 0x08000100);
+    cf.CFRunLoopAddSource(rl, src, defaultMode);
 
     cg.CGEventTapEnable(tapPort, false); // start disabled until setKeyInterceptLock(true)
     console.log("[keyIntercept] tap installed");
