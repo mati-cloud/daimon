@@ -6,9 +6,11 @@ import {
   KeyboardIcon,
   InfoIcon,
   SearchIcon,
+  MapIcon,
 } from "lucide-react";
 import { Keys } from "./Kbd";
 import { GLASS_DEFAULT, GLASS_MIN_OPACITY, loadGlass, nativeBlurLabel, nativeBlurMode, saveGlass, type Glass } from "@/lib/daimon/appearance";
+import { getShortcuts } from "@/lib/daimon/keymaps";
 
 /** The Linux app's window is opaque (see app/src/bun/index.ts): Electrobun delivers no
  *  keyboard input to a see-through CEF window there. DAIMON_TRANSPARENT=1 opts in. */
@@ -42,6 +44,7 @@ const CATEGORIES = [
   { id: "terminal",   label: "Terminal",   Icon: TerminalIcon },
   { id: "notif",      label: "Notifications", Icon: BellIcon },
   { id: "shortcuts",  label: "Shortcuts",  Icon: KeyboardIcon },
+  { id: "keymaps",    label: "Keymaps",    Icon: MapIcon },
   { id: "about",      label: "About",      Icon: InfoIcon },
 ] as const;
 
@@ -81,6 +84,36 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
         className={`inline-block size-3.5 rounded-full bg-white shadow transition-transform ${value ? "translate-x-4" : "translate-x-0.5"}`}
       />
     </button>
+  );
+}
+
+function KeymapsPanel() {
+  const shortcuts = getShortcuts();
+  const categories = Array.from(new Set(shortcuts.map(s => s.category)));
+  return (
+    <div>
+      {categories.map(cat => (
+        <div key={cat}>
+          <div className="px-4 pt-4 pb-1 font-mono text-[10px] text-muted-foreground/60 uppercase tracking-widest">{cat}</div>
+          {shortcuts.filter(s => s.category === cat).map(s => (
+            <div key={s.id} className={`flex items-center justify-between px-4 py-2 border-b border-border/30 ${s.conflict ? "bg-alarm/5" : ""}`}>
+              <div className="flex flex-col">
+                <span className="font-sans text-sm text-foreground/90">{s.description}</span>
+                {s.source === "plugin" && s.pluginName && (
+                  <span className="font-mono text-[10px] text-muted-foreground/50">plugin: {s.pluginName}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {s.conflict && (
+                  <span className="font-mono text-[10px] text-alarm bg-alarm/10 px-1.5 py-0.5 rounded">conflict</span>
+                )}
+                <Keys combo={s.combo} size="md" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -418,6 +451,8 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
                   </div>
                 ))}
               </div>
+            ) : category === "keymaps" && !showingSearch ? (
+              <KeymapsPanel />
             ) : category === "about" && !showingSearch ? (
               <div className="px-4 py-6">
                 <p className="font-sans text-sm text-foreground/80">daimon v0.1.0 — a terminal for developers</p>
