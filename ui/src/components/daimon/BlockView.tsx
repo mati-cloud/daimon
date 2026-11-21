@@ -2992,6 +2992,12 @@ function BlockViewImpl({ block, modeActive = false, onRerun, isLast, currentCtx 
             ? "tui-fullscreen absolute inset-0 z-50"
             : "mt-2.5 h-[min(24rem,60vh)] overflow-hidden rounded"}
           style={{ minHeight: 0, background: TUI_BG }}
+          onPointerUp={() => {
+            // After a mouse drag-select in the xterm fallback, the browser's native selection
+            // holds keyboard focus. Refocus the terminal input so keys reach the program again.
+            const ta = inlineTuiRef.current?.querySelector<HTMLElement>("textarea");
+            ta?.focus({ preventScroll: true });
+          }}
         />
       )}
       {!isTuiActive && block.out.length > 0 && (

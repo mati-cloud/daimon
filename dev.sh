@@ -170,7 +170,7 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 # ── JS dependencies ───────────────────────────────────────────────────────────
-[ -d "$ROOT/ui/node_modules" ]  || (log "installing ui deps...";  cd "$ROOT/ui"  && bun install)
+(log "installing ui deps...";  cd "$ROOT/ui"  && bun install)
 [ -d "$ROOT/app/node_modules" ] || (log "installing app deps..."; cd "$ROOT/app" && bun install)
 
 # ── 1. Rust pty-daemon (build first so compile errors stop the script) ───────

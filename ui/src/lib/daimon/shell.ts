@@ -595,6 +595,7 @@ export async function run(
     globalOutputOff = shell.onOutput((tid, data) => {
       if (tid !== tabId) return;
       if (!commandWritten) return; // discard pre-command PTY noise
+      if (!commandStarted && !isInteractive && !isStreamingInteractive && !resume) return; // discard shell echo before OSC 133;C
       if (isAltScreen(tabId)) { sawAltScreen = true; return; }
       // Buffer every byte for replay
       appendReplay(tabId, data);

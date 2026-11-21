@@ -181,7 +181,9 @@ export function Composer({
     const focusFromEvent = (e: Event) => {
       const sid = (e as CustomEvent).detail?.sessionId;
       if (sid && sid !== sessionId) return;
-      if (!interactive) inputRef.current?.focus();
+      // Don't steal focus from an inline TUI terminal (non-altscreen full-screen program).
+      const inlineTui = document.querySelector(`[data-pane="${sessionId}"] [data-tui] textarea, [data-pane-focused="true"] [data-tui] textarea`);
+      if (!interactive && !inlineTui) inputRef.current?.focus();
     };
     const prefillFromEvent = (e: Event) => {
       const { sessionId: sid, text } = (e as CustomEvent).detail ?? {};

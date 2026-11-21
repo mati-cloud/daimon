@@ -713,8 +713,8 @@ function Daimon() {
         focusLog(`page lacks focus (${why}) → ${requestPageFocus() ? "asked host" : "not asking (no host / asked <500ms ago)"}`);
         return;
       }
-      // A full-screen program in the focused pane takes the keys back (⌘C/⌘V reach it again).
-      const tui = document.querySelector<HTMLElement>('[data-pane-focused="true"] .tui-fullscreen textarea');
+      // A full-screen or inline TUI program in the focused pane takes the keys back.
+      const tui = document.querySelector<HTMLElement>('[data-pane-focused="true"] [data-tui] textarea');
       if (tui) { tui.focus(); focusLog(`focused terminal (${why})`); return; }
       focusComposer(focusedSidRef.current);
       focusLog(`focused composer (${why}) session=${focusedSidRef.current}`);
