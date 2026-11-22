@@ -116,6 +116,7 @@ registerShortcut({ id: "block-rerun",     combo: "⌘⇧ R",      description: "
 registerShortcut({ id: "block-expand",    combo: "⌘⇧ E",      description: "Expand / collapse block",   category: "Block Mode" });
 registerShortcut({ id: "block-find",      combo: "⌘⇧ F",      description: "Find in block",             category: "Block Mode" });
 registerShortcut({ id: "block-pin",       combo: "⌘⇧ P",      description: "Pin / unpin block",         category: "Block Mode" });
+registerShortcut({ id: "block-screenshot", combo: "⌘⇧ S",     description: "Screenshot block → clipboard (secrets redacted)", category: "Block Mode" });
 registerShortcut({ id: "block-select",    combo: "⌘⇧ Space",  description: "Toggle block selection",    category: "Block Mode" });
 registerShortcut({ id: "block-nav-up",    combo: "⌘⇧ ↑",      description: "Navigate to previous block", category: "Block Mode" });
 registerShortcut({ id: "block-nav-down",  combo: "⌘⇧ ↓",      description: "Navigate to next block",    category: "Block Mode" });

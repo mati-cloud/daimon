@@ -41,6 +41,9 @@ hljs.registerLanguage("css", hljsCss);
 hljs.registerLanguage("toml", hljsToml);
 
 export const PresentationModeContext = createContext(false);
+// True while a block is being captured to an image: virtualized output renders ALL rows and drops
+// its scroll cap so the screenshot shows the full block, not just the ~60vh visible window.
+export const CaptureModeContext = createContext(false);
 export const PagerContainerContext = createContext<HTMLElement | null>(null);
 
 // Patterns that look like secrets: API keys, tokens, passwords, JWTs, private keys
@@ -1108,12 +1111,12 @@ export function BlockMeta({ block, className = "" }: { block: Block; className?:
 function BlockModeHints({ open, collapsible }: { open: boolean; collapsible: "collapse" | "expand" | null }) {
   const shown = usePresence(open);
   if (!shown) return null;
-  const actions: [string, string][] = [["C", "copy all"], ["I", "cmd"], ["O", "output"], ["R", "re-run"], ["F", "find"], ["P", "pin"]];
+  const actions: [string, string][] = [["C", "copy all"], ["I", "cmd"], ["O", "output"], ["R", "re-run"], ["F", "find"], ["P", "pin"], ["S", "shot"]];
   if (collapsible) actions.push(["E", collapsible]);
   return (
     <span
       data-state={open ? "open" : "closed"}
-      className="popover-panel pointer-events-none flex items-center gap-1 rounded-md border border-signal/30 bg-card/90 px-2 py-0.5 shadow-sm"
+      className="block-mode-hints popover-panel pointer-events-none flex items-center gap-1 rounded-md border border-signal/30 bg-card/90 px-2 py-0.5 shadow-sm"
     >
       {actions.map(([k, label], ai) => (
         <span key={k} className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
@@ -2250,6 +2253,7 @@ const ANSI_ROW_PX = 17;
 function VirtualHtmlLines({ html, htmlLines }: { html: string; htmlLines?: string[] | undefined }) {
   // The parser hands over the lines while output streams; splitting is for stored blocks.
   const lines = useMemo(() => htmlLines ?? splitHtmlLines(html), [htmlLines, htmlLines ? null : html]);
+  const capturing = useContext(CaptureModeContext);
   const parentRef = useRef<HTMLDivElement>(null);
   const rowVirtualizer = useVirtualizer({
     count: lines.length,
@@ -2263,6 +2267,14 @@ function VirtualHtmlLines({ html, htmlLines }: { html: string; htmlLines?: strin
     const el = parentRef.current;
     if (el && followRef.current) el.scrollTop = el.scrollHeight;
   }, [lines.length]);
+  // Capture mode: emit every line as plain flow content (no virtualization, no scroll cap).
+  if (capturing) {
+    return (
+      <div className="font-mono text-[13px] leading-[17px] whitespace-pre-wrap">
+        {lines.map((l, i) => <div key={i} dangerouslySetInnerHTML={{ __html: l || " " }} />)}
+      </div>
+    );
+  }
   return (
     <div
       ref={parentRef}
@@ -2395,6 +2407,7 @@ function VirtualLines({ visibleLines, toneClass, search, pm, currentMatch, match
   onPathClick?: (path: string) => void;
 }) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const capturing = useContext(CaptureModeContext);
   const rowVirtualizer = useVirtualizer({
     count: visibleLines.length,
     getScrollElement: () => parentRef.current,
@@ -2408,6 +2421,18 @@ function VirtualLines({ visibleLines, toneClass, search, pm, currentMatch, match
     const el = parentRef.current;
     if (el && followRef.current) el.scrollTop = el.scrollHeight;
   }, [visibleLines.length]);
+
+  // Capture mode: all lines, no virtualization, no scroll cap. Redaction (pm) is preserved so the
+  // screenshot can never show a secret.
+  if (capturing) {
+    return (
+      <div className={`font-mono text-[13px] leading-6 whitespace-pre-wrap ${toneClass}`}>
+        {visibleLines.map((line, i) => (
+          <div key={i}>{pm ? redactNode(line) : (linkifyAll(line, onPathClick) || " ")}</div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div

@@ -555,3 +555,6 @@ html.magnify-grabbing, html.magnify-grabbing * { cursor: grabbing !important; us
   transition: opacity 0.15s ease;
 }
 .magnify-badge-show { opacity: 1; }
+
+/* Block screenshot (⌘⇧S): while capturing, hide the C/I/O/… hint row so it never lands in the image. */
+.capturing .block-mode-hints { display: none !important; }

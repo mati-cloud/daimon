@@ -1,11 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { toBlob } from "html-to-image";
 import { PluginGate } from "@/components/daimon/PluginGate";
 import { SidebarResizer, loadSidebarWidth } from "@/components/daimon/SidebarResizer";
 import { DaimonToaster } from "@/components/daimon/DaimonToaster";
 import { PlusIcon, XIcon, SunIcon, ZapIcon, PanelLeftIcon, GitBranchIcon, SearchIcon, EyeOffIcon, EyeIcon, SplitSquareHorizontalIcon, ArrowUpRightIcon, LinkIcon, BellIcon } from "lucide-react";
-import { BlockMeta, BlockView, PresentationModeContext } from "@/components/daimon/BlockView";
+import { BlockMeta, BlockView, PresentationModeContext, CaptureModeContext } from "@/components/daimon/BlockView";
 import { CommandIcon } from "@/components/daimon/CommandIcon";
 import { Composer } from "@/components/daimon/Composer";
 import { HistoryPanel } from "@/components/daimon/HistoryPanel";
@@ -65,6 +66,21 @@ type Session = {
 };
 
 let nextSessionNum = 1;
+
+/** Stack several PNG blobs vertically into one, on a solid background. */
+async function joinBlobs(blobs: Blob[], bg: string): Promise<Blob | null> {
+  const imgs = await Promise.all(blobs.map(b => createImageBitmap(b)));
+  const gap = 24;
+  const width = Math.max(...imgs.map(i => i.width));
+  const height = imgs.reduce((h, i) => h + i.height, 0) + gap * (imgs.length - 1);
+  const canvas = document.createElement("canvas");
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, width, height);
+  let y = 0;
+  for (const i of imgs) { ctx.drawImage(i, 0, y); y += i.height + gap; }
+  return new Promise(res => canvas.toBlob(res, "image/png"));
+}
 
 function makeSession(customName?: string): Session {
   const num = nextSessionNum++;
@@ -218,6 +234,7 @@ function Daimon() {
     toast(!presentationMode ? "Presentation mode on — secrets redacted" : "Presentation mode off", { duration: 2500, id: "presentation-mode" });
   };
   const [theme, setTheme] = useState<Theme>("light");
+
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarDragging, setSidebarDragging] = useState(false);
@@ -236,6 +253,66 @@ function Daimon() {
   const [blockModActive, setBlockModActive] = useState(false);
   const [pinnedBlockIds, setPinnedBlockIds] = useState<Set<string>>(new Set());
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(new Set());
+  // Block screenshot: ids to capture. While non-null, redaction is forced on (see the
+  // PresentationModeContext provider) so a secret can never land in the image.
+  const [captureReq, setCaptureReq] = useState<{ ids: string[] } | null>(null);
+
+  // Block screenshot: once captureReq is set the whole tree re-renders redacted (provider below).
+  // Wait two frames for that redacted render to commit, then clone the block node(s) into an
+  // off-screen frame sized to their FULL content (not viewport-clipped), styled like the app glass,
+  // and snapshot that to PNG. Security: we only ever read the redacted DOM, so no secret can leak.
+  useEffect(() => {
+    if (!captureReq) return;
+    let cancelled = false;
+    const prevWidth = new Map<HTMLElement, string>();
+    const raf1 = requestAnimationFrame(() => requestAnimationFrame(async () => {
+      try {
+        const nodes = captureReq.ids
+          .map(id => document.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(id)}"]`))
+          .filter((n): n is HTMLElement => !!n);
+        if (!nodes.length) return;
+
+        // Capture the LIVE block node(s) (CaptureModeContext forces full, unvirtualized output).
+        // html-to-image clones internally and applies `style`, so padding + opaque theme bg go there.
+        // A detached off-screen clone renders blank in WKWebView (foreignObject), so we snapshot the
+        // on-page node. `.capturing` on <html> hides the C/I/O hint row (CSS, synchronous — flipping
+        // the React prop lags a frame behind the capture).
+        document.documentElement.classList.add("capturing");
+        // Widen each node to its full content width so long/unbreakable lines (PATH, FPATH) are
+        // captured in full instead of clipped at the viewport-width node box. Restored in finally.
+        for (const n of nodes) { prevWidth.set(n, n.style.width); n.style.width = `${n.scrollWidth}px`; }
+        await new Promise(res => requestAnimationFrame(res)); // let the widened layout settle
+
+        const bg = getComputedStyle(document.documentElement).getPropertyValue("--background").trim() || "#0b0b0f";
+        const opts = { pixelRatio: 2, backgroundColor: bg, style: { padding: "24px 28px", background: bg } };
+        const blobs: (Blob | null)[] = [];
+        for (const n of nodes) blobs.push(await toBlob(n, opts));
+        const ok = blobs.filter((b): b is Blob => !!b);
+        if (cancelled || !ok.length) return;
+        const blob = ok.length === 1 ? ok[0]! : await joinBlobs(ok, bg);
+        if (!blob) return;
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+          toast.success(nodes.length > 1 ? `${nodes.length} blocks copied as image` : "Screenshot copied");
+        } catch {
+          // ponytail: browser ClipboardItem PNG; native image-clipboard via Bun bridge if a target webview rejects it
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = "daimon-block.png"; a.click();
+          URL.revokeObjectURL(url);
+          toast("Screenshot saved to downloads");
+        }
+      } catch (err) {
+        console.warn("[screenshot] capture failed:", err);
+        toast.error("Screenshot failed");
+      } finally {
+        prevWidth.forEach((w, n) => { n.style.width = w; });
+        document.documentElement.classList.remove("capturing");
+        if (!cancelled) setCaptureReq(null);
+      }
+    }));
+    return () => { cancelled = true; cancelAnimationFrame(raf1); };
+  }, [captureReq]);
   const [searchQuery, setSearchQuery] = useState("");
   // Open fullscreen pagers (git log / git diff) per pane id; "" = unscoped.
   const [pagerPanes, setPagerPanes] = useState<Record<string, number>>({});
@@ -1019,6 +1096,9 @@ function Daimon() {
       } else if (key === "P") {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("block-pin-toggle", { detail: { blockId: block.id } }));
+      } else if (key === "S") {
+        e.preventDefault();
+        setCaptureReq({ ids: targets.map(b => b.id) });
       }
     };
     const onUp = (e: KeyboardEvent) => {
@@ -1301,7 +1381,7 @@ function Daimon() {
                     onMouseEnter={() => { if (!pagerActive) { kbdDrivenRef.current = false; setHoveredBlockId(b.id); } if (!isFocused) setFocusedPane(splitSessionId && paneSessionId === splitSessionId ? "right" : "left"); }}
                     onMouseLeave={() => setHoveredBlockId(null)}
                   >
-                    <BlockView block={b} modeActive={effectiveHoveredBlockId === b.id && effectiveBlockModActive} isPinned={pinnedBlockIds.has(b.id)} isSelected={selectedBlockIds.has(b.id)} onPinToggle={(id) => setPinnedBlockIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; })} onRerun={(cmd) => submitRef.current(cmd, paneSessionId)} isLast={i === pane.blocks.length - 1} currentCtx={pane.state.ctx.name} sessionId={pane.id} isTuiActive={tuiBlockIds.get(pane.id) === b.id} promptingForInput={panePrompting && !!b.pending} onSearch={(q) => { setGlobalSearchQuery(q); setGlobalSearchOpen(true); }} onPathClick={(path) => { const expanded = path.startsWith("~") ? HOME + path.slice(1) : path; const hasExt = /\.[^/]+$/.test(expanded.split("/").pop() ?? ""); const dir = hasExt ? expanded.split("/").slice(0, -1).join("/") || "/" : expanded; submitRef.current("cd " + JSON.stringify(dir), paneSessionId); toast("cd " + dir, { duration: 2000 }); }} />
+                    <BlockView block={b} modeActive={effectiveHoveredBlockId === b.id && effectiveBlockModActive && !captureReq} isPinned={pinnedBlockIds.has(b.id)} isSelected={selectedBlockIds.has(b.id)} onPinToggle={(id) => setPinnedBlockIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; })} onRerun={(cmd) => submitRef.current(cmd, paneSessionId)} isLast={i === pane.blocks.length - 1} currentCtx={pane.state.ctx.name} sessionId={pane.id} isTuiActive={tuiBlockIds.get(pane.id) === b.id} promptingForInput={panePrompting && !!b.pending} onSearch={(q) => { setGlobalSearchQuery(q); setGlobalSearchOpen(true); }} onPathClick={(path) => { const expanded = path.startsWith("~") ? HOME + path.slice(1) : path; const hasExt = /\.[^/]+$/.test(expanded.split("/").pop() ?? ""); const dir = hasExt ? expanded.split("/").slice(0, -1).join("/") || "/" : expanded; submitRef.current("cd " + JSON.stringify(dir), paneSessionId); toast("cd " + dir, { duration: 2000 }); }} />
                   </div>
                 ))}
               </div>
@@ -1451,7 +1531,8 @@ function Daimon() {
   );
 
   return (
-    <PresentationModeContext.Provider value={presentationMode}>
+    <PresentationModeContext.Provider value={presentationMode || captureReq !== null}>
+     <CaptureModeContext.Provider value={captureReq !== null}>
     <div
       className="flex flex-col h-screen bg-transparent text-foreground overflow-hidden"
       style={{ "--sidebar-w": `${sidebarWidth}px` } as React.CSSProperties}
@@ -1810,6 +1891,7 @@ function Daimon() {
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} theme={theme} onTheme={setTheme} fontSize={fontSize} onFontSize={setFontSize} showBadges={showBadges} onShowBadges={setShowBadges} showPowerline={showPowerline} onShowPowerline={setShowPowerline} />
       </div>
     </div>
+    </CaptureModeContext.Provider>
     </PresentationModeContext.Provider>
   );
 }
