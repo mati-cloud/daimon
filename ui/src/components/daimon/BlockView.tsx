@@ -843,6 +843,14 @@ function GitLogView({ entries: rawEntries, cwd, kind: _kind, isLast }: Extract<O
   const fileRowRefs = useRef<Record<string, (HTMLDivElement | null)[]>>({});
   const filePathsRef = useRef<Record<string, string[]>>({});
 
+  useLayoutEffect(() => {
+    const entry = entries[commitIdx];
+    const el = fileIdx !== null && entry
+      ? fileRowRefs.current[entry.hash]?.[fileIdx]
+      : commitRowRefs.current[commitIdx];
+    el?.scrollIntoView({ block: "nearest" });
+  }, [commitIdx, fileIdx]);
+
   const toggleCommit = (hash: string) => setExpanded((prev) => {
     const next = new Set(prev); if (next.has(hash)) next.delete(hash); else next.add(hash); return next;
   });

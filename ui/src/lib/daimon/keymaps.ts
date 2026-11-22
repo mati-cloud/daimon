@@ -105,6 +105,7 @@ registerShortcut({ id: "split-pane",      combo: "⌘D",         description: "S
 registerShortcut({ id: "sidebar",         combo: "⌘B",         description: "Toggle sidebar",            category: "Global" });
 registerShortcut({ id: "commands",        combo: "⌘P",         description: "Command palette",           category: "Global" });
 registerShortcut({ id: "settings",        combo: "⌘,",         description: "Open settings",             category: "Global" });
+registerShortcut({ id: "presentation",     combo: "⌘⇧ V",      description: "Toggle presentation mode",  category: "Global" });
 registerShortcut({ id: "interrupt",       combo: "Ctrl+C",     description: "Interrupt running command", category: "Terminal" });
 registerShortcut({ id: "eof",             combo: "Ctrl+D",     description: "Send EOF / close input",    category: "Terminal" });
 registerShortcut({ id: "block-mod",       combo: "⌘⇧ (hold)", description: "Enter block mode",          category: "Block Mode" });

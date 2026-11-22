@@ -807,7 +807,7 @@ function Daimon() {
       }
       if (!mod(e)) return;
 
-      if (chord(e, true,  "p")) { e.preventDefault(); togglePresentation(); return; }
+      if (chord(e, true,  "v")) { e.preventDefault(); togglePresentation(); return; }
       if (chord(e, false, "p")) { e.preventDefault(); setPaletteOpen(true); return; }
       if (chord(e, false, "f")) { e.preventDefault(); setGlobalSearchOpen(true); return; }
       if (chord(e, false, "=") || chord(e, false, "+")) { e.preventDefault(); setFontSize(s => Math.min(s + 1, 20)); return; }
@@ -1736,7 +1736,7 @@ function Daimon() {
             )}
             <button
               onClick={togglePresentation}
-              title={presentationMode ? "Presentation mode on (⌘⇧P)" : "Presentation mode off (⌘⇧P)"}
+              title={presentationMode ? "Presentation mode on (⌘⇧V)" : "Presentation mode off (⌘⇧V)"}
               className={`rounded-md p-1.5 transition-colors ${presentationMode ? "text-amber-400 bg-amber-400/10 hover:bg-amber-400/20" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}
             >
               {presentationMode ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}

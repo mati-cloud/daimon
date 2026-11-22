@@ -230,43 +230,56 @@ function KeymapsPanel({ onStartCapture }: { onStartCapture: (s: { id: string; de
   useEffect(() => subscribeKeymaps(() => setShortcuts(getShortcuts())), []);
 
   const anyConflict = shortcuts.some(s => s.conflict);
+  const conflicting = shortcuts.filter(s => s.conflict);
   const categories = Array.from(new Set(shortcuts.map(s => s.category)));
 
   return (
     <div>
       {anyConflict && (
-        <div className="mx-4 mt-3 mb-1 flex items-start gap-2 rounded-md border border-alarm/40 bg-alarm/8 px-3 py-2.5">
-          <span className="font-mono text-[11px] font-semibold text-alarm leading-snug">
-            Shortcut conflict — resolve before daimon can process affected keys
+        <div className="mx-4 mt-3 mb-1 flex flex-col gap-1.5 rounded-md border border-alarm/40 bg-alarm/8 px-3 py-2.5">
+          <span className="font-mono text-[13px] font-semibold text-alarm leading-snug">
+            Shortcut conflict — key-bindings are blocked until it is resolved
           </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {conflicting.map(s => (
+              <button
+                key={s.id}
+                onClick={() => onStartCapture({ id: s.id, desc: s.description, current: s.effectiveCombo })}
+                title={`Remap "${s.description}"`}
+                className="rounded border border-alarm/50 bg-alarm/10 px-2 py-1 font-mono text-[12px] text-alarm hover:border-alarm hover:bg-alarm/20 transition-colors"
+              >
+                {s.description} <span className="opacity-70">({s.effectiveCombo})</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
       {categories.map(cat => (
         <div key={cat}>
-          <div className="px-4 pt-4 pb-1 font-mono text-[10px] text-muted-foreground/60 uppercase tracking-widest">{cat}</div>
+          <div className="px-4 pt-4 pb-1 font-mono text-[11px] text-muted-foreground/60 uppercase tracking-widest">{cat}</div>
           {shortcuts.filter(s => s.category === cat).map(s => (
             <div key={s.id} className={`flex items-center justify-between px-4 py-2 border-b border-border/30 ${s.conflict ? "bg-alarm/5" : ""}`}>
               <div className="flex flex-col min-w-0 mr-3">
-                <span className="font-sans text-sm text-foreground/90">{s.description}</span>
+                <span className="font-sans text-base text-foreground/90">{s.description}</span>
                 {s.source === "plugin" && s.pluginName && (
-                  <span className="font-mono text-[10px] text-muted-foreground/50">plugin: {s.pluginName}</span>
+                  <span className="font-mono text-[11px] text-muted-foreground/50">plugin: {s.pluginName}</span>
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {s.conflict && (
-                  <span className="font-mono text-[10px] text-alarm bg-alarm/10 px-1.5 py-0.5 rounded">conflict</span>
+                  <span className="font-mono text-[11px] text-alarm bg-alarm/10 px-1.5 py-0.5 rounded">conflict</span>
                 )}
                 {s.overridden && (
                   <button
                     onClick={() => { setOverride(s.id, ""); setShortcuts(getShortcuts()); }}
-                    className="font-mono text-[10px] text-muted-foreground/50 hover:text-foreground"
+                    className="font-mono text-[11px] text-muted-foreground/50 hover:text-foreground"
                     title="Reset to default"
                   >reset</button>
                 )}
                 <button
                   onClick={() => onStartCapture({ id: s.id, desc: s.description, current: s.effectiveCombo })}
                   title="Click to remap"
-                  className={`rounded border px-2 py-0.5 font-mono text-[12px] transition-colors hover:border-signal/60 ${s.conflict ? "border-alarm/60 bg-alarm/5 text-alarm" : s.overridden ? "border-signal/40 text-signal" : "border-border text-foreground/80"}`}
+                  className={`rounded border px-2 py-0.5 font-mono text-[14px] transition-colors hover:border-signal/60 ${s.conflict ? "border-alarm/60 bg-alarm/5 text-alarm" : s.overridden ? "border-signal/40 text-signal" : "border-border text-foreground/80"}`}
                 >
                   {s.effectiveCombo || <span className="text-muted-foreground/40 italic">none</span>}
                 </button>
