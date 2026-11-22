@@ -42,6 +42,18 @@ export function installMagnify(target: HTMLElement): () => void {
   let frame = 0;
   let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Live scale readout (e.g. "1.3×") shown while pinching; hidden at 100%.
+  const badge = document.createElement("div");
+  badge.className = "magnify-badge";
+  let badgeTimer: ReturnType<typeof setTimeout> | null = null;
+  const showBadge = (scale: number) => {
+    badge.textContent = `${scale.toFixed(1)}×`;
+    if (!badge.isConnected) document.body.appendChild(badge);
+    badge.classList.toggle("magnify-badge-show", scale > 1.001);
+    if (badgeTimer) clearTimeout(badgeTimer);
+    badgeTimer = setTimeout(() => badge.classList.remove("magnify-badge-show"), 900);
+  };
+
   /** Keep the scaled page covering the window: no empty margin on any side. */
   const clampPan = (scale: number, px: number, py: number): [number, number] => {
     if (scale === 1) return [0, 0];
@@ -82,6 +94,7 @@ export function installMagnify(target: HTMLElement): () => void {
     const k = scale / ts;
     const [nx, ny] = clampPan(scale, px - (px - tx) * k, py - (py - ty) * k);
     ts = scale; tx = nx; ty = ny;
+    showBadge(scale);
     animate();
   };
 
@@ -188,6 +201,8 @@ export function installMagnify(target: HTMLElement): () => void {
     setCursor("");
     if (frame) cancelAnimationFrame(frame);
     if (settleTimer) clearTimeout(settleTimer);
+    if (badgeTimer) clearTimeout(badgeTimer);
+    badge.remove();
     s = ts = 1; x = y = tx = ty = 0;
     apply();
     announce(1);
