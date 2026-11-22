@@ -181,7 +181,7 @@ function CodeView({ text, lang }: { text: string; lang: string }) {
     catch { return hljs.highlightAuto(text).value; }
   }, [text, lang]);
   return (
-    <pre className="font-mono text-[length:var(--terminal-font-size,13px)] leading-6 overflow-x-auto">
+    <pre className="font-mono text-[13px] leading-6 overflow-x-auto">
       <code className={`hljs language-${lang}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
     </pre>
   );
@@ -1578,7 +1578,7 @@ function PrettyView({ format, text }: { format: "json" | "yaml"; text: string })
           onClick={() => setRaw(false)}
           className="absolute right-1 top-1 rounded border border-line/40 bg-card px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:text-foreground transition-colors z-10"
         >pretty</button>
-        <pre className="whitespace-pre-wrap font-mono text-[length:var(--terminal-font-size,13px)] leading-6 text-foreground">{text}</pre>
+        <pre className="whitespace-pre-wrap font-mono text-[13px] leading-6 text-foreground">{text}</pre>
       </div>
     );
   }
@@ -1646,7 +1646,7 @@ function PrettyView({ format, text }: { format: "json" | "yaml"; text: string })
         onClick={() => setRaw(true)}
         className="absolute right-1 top-1 rounded border border-line/40 bg-card px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:text-foreground transition-colors z-10"
       >raw</button>
-      <pre className="whitespace-pre-wrap font-mono text-[length:var(--terminal-font-size,13px)] leading-6">{highlighted}</pre>
+      <pre className="whitespace-pre-wrap font-mono text-[13px] leading-6">{highlighted}</pre>
     </div>
   );
 }
@@ -1663,7 +1663,7 @@ function LogfmtView({ lines }: { lines: Record<string, string>[] }) {
   };
 
   return (
-    <div className="space-y-px font-mono text-[length:var(--terminal-font-size,13px)]">
+    <div className="space-y-px font-mono text-[13px]">
       {lines.map((fields, i) => {
         const level = (fields["level"] ?? fields["lvl"] ?? "").toLowerCase();
         const msg = fields["msg"] ?? fields["message"] ?? "";
