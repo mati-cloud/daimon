@@ -226,7 +226,7 @@ export function LandingPage({ blocks, history = [], onCd, onRun, onOpenPalette }
   })();
 
   return (
-    <section ref={sectionRef} className="w-full px-8 py-10 max-w-5xl">
+    <section ref={sectionRef} className="w-full px-8 pb-10 max-w-5xl">
 
       {/* ── Hero ── */}
       <div className="mb-14">

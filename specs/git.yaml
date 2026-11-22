@@ -1,6 +1,14 @@
 name: git
 description: Version control
 
+# User-defined aliases from `git config` surface as subcommands at runtime.
+# sed turns `alias.<name> <value>` into `<name><TAB>Alias for <value>` so the
+# engine's generic lines/tab parsing shows them annotated.
+subcommand_source:
+  - sh
+  - -c
+  - git config --get-regexp '^alias\.' | sed 's/^alias\.//;s/ /\tAlias for /'
+
 subcommands:
   - name: add
     description: Stage files

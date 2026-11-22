@@ -55,10 +55,17 @@ pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<S
         return filesystem_completions(&partial, cwd, false, remote);
     };
 
+    complete_against(spec, &words, idx, &partial, cwd, remote)
+}
+
+/// Spec-dependent completion: walk the subcommand tree and suggest subcommands/flags/args for
+/// the token at `idx`. Split out from `complete_with` so a spec can be supplied directly in tests.
+fn complete_against(spec: &crate::spec::Spec, words: &[String], idx: usize, partial: &str, cwd: &str, remote: Option<&Listing>) -> Vec<Suggestion> {
     // Walk subcommand tree
     let mut subcommands = &spec.subcommands;
     let mut flags = &spec.flags;
     let mut args = &spec.args;
+    let mut sub_source = &spec.subcommand_source;
     let mut no_fallback = spec.no_file_fallback;
     let mut sub_depth = 1usize;
 
@@ -68,6 +75,7 @@ pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<S
             subcommands = &sub.subcommands;
             flags = &sub.flags;
             args = &sub.args;
+            sub_source = &sub.subcommand_source;
             no_fallback = sub.no_file_fallback;
             sub_depth += 1;
         } else {
@@ -80,11 +88,11 @@ pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<S
     // If partial starts with '-', complete flags
     if partial.starts_with('-') {
         for f in flags {
-            if f.name.starts_with(&partial) {
+            if f.name.starts_with(partial) {
                 out.push(Suggestion { text: f.name.clone(), description: f.description.clone(), kind: SuggestionKind::Flag });
             }
             if let Some(short) = &f.short {
-                if short.starts_with(&partial) {
+                if short.starts_with(partial) {
                     out.push(Suggestion { text: short.clone(), description: f.description.clone(), kind: SuggestionKind::Flag });
                 }
             }
@@ -97,13 +105,24 @@ pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<S
     // suggestions in, so position 1 offers subcommands ∪ args, like the tool itself.
     if sub_depth == idx {
         for s in subcommands {
-            if s.name.starts_with(&partial) {
+            if s.name.starts_with(partial) {
                 out.push(Suggestion { text: s.name.clone(), description: s.description.clone(), kind: SuggestionKind::Subcommand });
+            }
+        }
+        // Dynamic subcommands from a completer command (e.g. git config aliases). Skipped for
+        // remote shells: the command would run against this machine, not the remote one.
+        // Dedup against static names and each other — git config lists an alias once per scope
+        // (repo + global), so the same name can arrive twice.
+        if let (Some(command), None) = (sub_source, remote) {
+            for (text, description) in command_rows(command, "lines", partial, cwd) {
+                if out.iter().all(|s| s.text != text) {
+                    out.push(Suggestion { text, description, kind: SuggestionKind::Subcommand });
+                }
             }
         }
         if !out.is_empty() {
             if let Some(arg) = args.first() {
-                out.extend(complete_arg(&arg.kind, &partial, cwd, remote));
+                out.extend(complete_arg(&arg.kind, partial, cwd, remote));
             }
             return out;
         }
@@ -115,7 +134,7 @@ pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<S
         .or_else(|| args.last().filter(|a| matches!(a.kind, ArgKind::Rest)));
 
     if let Some(arg) = arg {
-        return complete_arg(&arg.kind, &partial, cwd, remote);
+        return complete_arg(&arg.kind, partial, cwd, remote);
     }
 
     // No declared arg covers this position. A tool that takes no file args suppresses the
@@ -124,7 +143,7 @@ pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<S
         return out;
     }
     // Last resort: filesystem
-    filesystem_completions(&partial, cwd, false, remote)
+    filesystem_completions(partial, cwd, false, remote)
 }
 
 fn complete_arg(kind: &ArgKind, partial: &str, cwd: &str, remote: Option<&Listing>) -> Vec<Suggestion> {
@@ -151,6 +170,15 @@ fn complete_arg(kind: &ArgKind, partial: &str, cwd: &str, remote: Option<&Listin
 /// Run a user-declared completer command in `cwd`, split stdout, filter by `partial`.
 /// Killed after ~1s so a slow/hung completer can't stall completion. Output capped.
 fn command_choices(command: &[String], split: &str, partial: &str, cwd: &str) -> Vec<Suggestion> {
+    command_rows(command, split, partial, cwd)
+        .into_iter()
+        .map(|(text, description)| Suggestion { text, description, kind: SuggestionKind::Choice })
+        .collect()
+}
+
+/// Spawn a completer command, parse its stdout into `(value, description)` rows filtered by
+/// `partial`. Shared by arg-value completion (`Choice`) and dynamic subcommands (`Subcommand`).
+fn command_rows(command: &[String], split: &str, partial: &str, cwd: &str) -> Vec<(String, Option<String>)> {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
@@ -198,11 +226,7 @@ fn command_choices(command: &[String], split: &str, partial: &str, cwd: &str) ->
     };
     rows.into_iter()
         .filter(|(v, _)| !v.is_empty() && v.starts_with(partial))
-        .map(|(v, d)| Suggestion {
-            text: v.to_string(),
-            description: d.filter(|s| !s.is_empty()).map(str::to_string),
-            kind: SuggestionKind::Choice,
-        })
+        .map(|(v, d)| (v.to_string(), d.filter(|s| !s.is_empty()).map(str::to_string)))
         .collect()
 }
 
@@ -316,10 +340,13 @@ mod fs_tests {
         assert!(texts("sub/file.txt/", cwd).is_empty()); // a file isn't listed into
 
         // ~ expands for reading but stays as typed in the suggestion.
+        let prev_home = std::env::var_os("HOME");
         std::env::set_var("HOME", &root);
         assert_eq!(texts("~/sub/.h", "/"), ["~/sub/.hidden"]);
         assert_eq!(texts("~/s", "/"), ["~/sub/"]);
         assert_eq!(texts("~", "/"), ["~/"]);
+        // restore so later tests that shell out to git don't inherit a removed HOME
+        match prev_home { Some(h) => std::env::set_var("HOME", h), None => std::env::remove_var("HOME") }
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -348,6 +375,57 @@ mod fs_tests {
 
         // missing binary yields nothing, never panics
         assert!(command_choices(&["definitely-not-a-binary-xyz".into()], "whitespace", "", "/tmp").is_empty());
+    }
+
+    #[test]
+    fn git_aliases_surface_as_deduped_subcommands() {
+        let root = std::env::temp_dir().join(format!("daimon-gitalias-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let repo = git2::Repository::init(&root).unwrap();
+        let mut cfg = repo.config().unwrap();
+        cfg.set_str("alias.ai-commit", "!git-ai-commit").unwrap();
+        let cwd = root.to_str().unwrap();
+
+        // The formatter the git spec uses, driven directly so the test is independent of the
+        // real user's ~/.gitconfig (which git config --get-regexp would otherwise also read).
+        let src = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            // --local: only this repo's config, so the result is deterministic in CI.
+            r"git config --local --get-regexp '^alias\.' | sed 's/^alias\.//;s/ /\tAlias for /'".to_string(),
+        ];
+        let rows = command_rows(&src, "lines", "ai", cwd);
+        assert_eq!(rows, vec![("ai-commit".to_string(), Some("Alias for !git-ai-commit".to_string()))]);
+        assert!(command_rows(&src, "lines", "zz", cwd).is_empty());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn dynamic_subcommands_merge_and_dedup() {
+        // Engine-level: static subcommand + a generator that emits one new and one duplicate
+        // name. Result merges them and drops the dup, keeping the static entry's description.
+        use crate::spec::{Spec, Subcommand};
+        let spec = Spec {
+            name: "demo".into(),
+            description: None,
+            subcommands: vec![Subcommand {
+                name: "build".into(), description: Some("static".into()), aliases: vec![],
+                subcommands: vec![], flags: vec![], args: vec![], subcommand_source: None, no_file_fallback: false,
+            }],
+            flags: vec![], args: vec![],
+            // emits `build` (dup of static) and `deploy` (new), tab-annotated
+            subcommand_source: Some(vec![
+                "printf".into(), r"build\tgen\ndeploy\tgenerated\n".into(),
+            ]),
+            no_file_fallback: false,
+        };
+        let (words, idx, partial) = crate::tokenize::tokenize("demo ", 5);
+        let out = complete_against(&spec, &words, idx, &partial, "/tmp", None);
+        let texts: Vec<_> = out.iter().map(|s| s.text.as_str()).collect();
+        assert!(texts.contains(&"deploy"), "generated subcommand missing: {texts:?}");
+        assert_eq!(texts.iter().filter(|t| **t == "build").count(), 1, "build not deduped: {texts:?}");
+        // static description wins over the generator's for the duplicate
+        assert_eq!(out.iter().find(|s| s.text == "build").unwrap().description.as_deref(), Some("static"));
     }
 }
 

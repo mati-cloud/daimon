@@ -152,3 +152,15 @@ fn df_takes_no_file_args() {
     let flags = complete("df -", cwd);
     assert!(!flags.is_empty() && flags.iter().all(|s| matches!(s.kind, SuggestionKind::Flag)));
 }
+
+#[test]
+fn git_alias_from_real_config_surfaces() {
+    // Runs against the invoking repo's git config; only asserts when an alias exists so it
+    // never fails in a clean checkout. In this repo `alias.ai-commit` is set.
+    let cwd = std::env::current_dir().unwrap();
+    let cwd = cwd.to_str().unwrap();
+    let out = daimon_complete::complete("git ai", cwd);
+    if std::process::Command::new("git").args(["config","--get","alias.ai-commit"]).output().map(|o| o.status.success()).unwrap_or(false) {
+        assert!(out.iter().any(|s| s.text == "ai-commit"), "got: {:?}", out.iter().map(|s|&s.text).collect::<Vec<_>>());
+    }
+}

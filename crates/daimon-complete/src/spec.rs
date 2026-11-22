@@ -12,6 +12,12 @@ pub struct Spec {
     pub flags: Vec<Flag>,
     #[serde(default)]
     pub args: Vec<Arg>,
+    /// Extra subcommands produced at runtime by a completer command, parsed like
+    /// `ArgKind::Command` with split "lines" (`value<TAB>description`) and merged with the
+    /// static `subcommands` here. Not run for remote shells. Use the real binary or a
+    /// formatter, not a wrapper whose stdout gets sourced/eval'd.
+    #[serde(default)]
+    pub subcommand_source: Option<Vec<String>>,
     /// Don't fall back to filesystem completion at a position no declared arg covers.
     /// For tools that take no file arguments (e.g. `df`), so the prompt doesn't list files.
     #[serde(default)]
@@ -31,6 +37,9 @@ pub struct Subcommand {
     pub flags: Vec<Flag>,
     #[serde(default)]
     pub args: Vec<Arg>,
+    /// See `Spec::subcommand_source`.
+    #[serde(default)]
+    pub subcommand_source: Option<Vec<String>>,
     /// See `Spec::no_file_fallback`.
     #[serde(default)]
     pub no_file_fallback: bool,
