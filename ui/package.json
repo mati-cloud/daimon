@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "bun run scripts/embed-wasm.ts && vite build",
-    "build:dev": "bun run scripts/embed-wasm.ts && vite build --mode development",
+    "build": "([ -f src/lib/terminal-wasm/terminal_wasm_bg.wasm ] && bun run scripts/embed-wasm.ts || true) && vite build",
+    "build:dev": "([ -f src/lib/terminal-wasm/terminal_wasm_bg.wasm ] && bun run scripts/embed-wasm.ts || true) && vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write ."

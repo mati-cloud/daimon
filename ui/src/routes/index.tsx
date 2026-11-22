@@ -224,6 +224,9 @@ function Daimon() {
   // Not while a TUI (claude, vim, k9s, …) owns the pane: the command above it means nothing there.
   const tuiInActive = tuiBlockIds.has(active.id) || altScreenActive;
   const headerBlock = headerBlockId && !tuiInActive ? active.blocks.find((b) => b.id === headerBlockId) : undefined;
+  const lastHeaderBlockRef = useRef(headerBlock);
+  if (headerBlock) lastHeaderBlockRef.current = headerBlock;
+  const displayHeaderBlock = headerBlock ?? lastHeaderBlockRef.current;
   const [presentationMode, setPresentationMode] = useState(false);
   // Toast outside the state updater — updaters can run twice (StrictMode / batching), which would
   // fire the toast twice. Derive the next value from current state here instead.
@@ -263,6 +266,7 @@ function Daimon() {
     if (!captureReq) return;
     let cancelled = false;
     const prevWidth = new Map<HTMLElement, string>();
+    const prevOverflow = new Map<HTMLElement, string>();
     const raf1 = requestAnimationFrame(() => requestAnimationFrame(async () => {
       try {
         const nodes = "pane" in captureReq
@@ -279,7 +283,6 @@ function Daimon() {
         // the React prop lags a frame behind the capture).
         document.documentElement.classList.add("capturing");
         // Temporarily make nodes overflow-visible so scrollWidth reflects full content (not viewport clip).
-        const prevOverflow = new Map<HTMLElement, string>();
         for (const n of nodes) { prevOverflow.set(n, n.style.overflow); n.style.overflow = "visible"; }
         // Widen each node to its full content width so long/unbreakable lines (PATH, FPATH) are
         // captured in full instead of clipped at the viewport-width node box. Restored in finally.
@@ -1803,18 +1806,20 @@ function Daimon() {
             </span>
             {/* The command of the block scrolled out above the viewport, sticky like a section
                 heading: click to scroll back to its start. */}
-            {/* Always takes its line, so the header doesn't change height as you scroll. */}
-            <div className="no-drag flex h-[18px] min-w-0 items-center gap-3">
-              {headerBlock && (<>
-                <button
-                  onClick={() => blockRefsMap.current.get(headerBlock.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                  title={headerBlock.input}
-                  className={`min-w-0 truncate font-mono text-[12px] underline-offset-4 hover:underline ${!headerBlock.pending && headerBlock.code !== 0 ? "text-alarm" : "text-muted-foreground"}`}
-                >
-                  {headerBlock.input}
-                </button>
-                <BlockMeta block={headerBlock} className="shrink-0" />
-              </>)}
+            <div className={`no-drag grid min-w-0 transition-[grid-template-rows,opacity] duration-200 ${headerBlock ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}>
+              <div className="flex min-w-0 items-center gap-3 overflow-hidden">
+                {displayHeaderBlock && (<>
+                  <button
+                    key={displayHeaderBlock.id}
+                    onClick={() => blockRefsMap.current.get(displayHeaderBlock.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    title={displayHeaderBlock.input}
+                    className={`min-w-0 truncate font-mono text-[12px] underline-offset-4 hover:underline animate-in fade-in duration-150 ${!displayHeaderBlock.pending && displayHeaderBlock.code !== 0 ? "text-alarm" : "text-muted-foreground"}`}
+                  >
+                    {displayHeaderBlock.input}
+                  </button>
+                  <BlockMeta block={displayHeaderBlock} className="shrink-0 animate-in fade-in duration-150" />
+                </>)}
+              </div>
             </div>
           </div>
 
