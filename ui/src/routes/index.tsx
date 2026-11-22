@@ -253,7 +253,7 @@ function Daimon() {
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(new Set());
   // Block screenshot: ids to capture. While non-null, redaction is forced on (see the
   // PresentationModeContext provider) so a secret can never land in the image.
-  const [captureReq, setCaptureReq] = useState<{ ids: string[] } | null>(null);
+  const [captureReq, setCaptureReq] = useState<{ ids: string[] } | { pane: string } | null>(null);
 
   // Block screenshot: once captureReq is set the whole tree re-renders redacted (provider below).
   // Wait two frames for that redacted render to commit, then clone the block node(s) into an
@@ -265,9 +265,11 @@ function Daimon() {
     const prevWidth = new Map<HTMLElement, string>();
     const raf1 = requestAnimationFrame(() => requestAnimationFrame(async () => {
       try {
-        const nodes = captureReq.ids
-          .map(id => document.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(id)}"]`))
-          .filter((n): n is HTMLElement => !!n);
+        const nodes = "pane" in captureReq
+          ? (() => { const n = document.querySelector<HTMLElement>(`[data-pane="${CSS.escape(captureReq.pane)}"]`); return n ? [n] : []; })()
+          : captureReq.ids
+              .map(id => document.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(id)}"]`))
+              .filter((n): n is HTMLElement => !!n);
         if (!nodes.length) return;
 
         // Capture the LIVE block node(s) (CaptureModeContext forces full, unvirtualized output).
@@ -1059,7 +1061,13 @@ function Daimon() {
         });
         return;
       }
-      if (!hoveredBlockId) return;
+      if (!hoveredBlockId) {
+        if (e.key.toUpperCase() === "S") {
+          e.preventDefault();
+          setCaptureReq({ pane: activeId });
+        }
+        return;
+      }
       const block = active.blocks.find(b => b.id === hoveredBlockId);
       if (!block) return;
       const key = e.key.toUpperCase();
