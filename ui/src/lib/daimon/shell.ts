@@ -292,11 +292,17 @@ function clearReplay(tabId: string) { replayBufMap.delete(tabId); replaySize.del
 
 // Per-tab ready promises — triggers session open, resolves immediately.
 const readyPromiseMap = new Map<string, Promise<void>>();
+// Dir a not-yet-spawned tab should start in (inherited from the tab it was opened from).
+const initialCwdMap = new Map<string, string>();
+
+/** New tabs inherit the active tab's cwd: spawn the PTY there instead of home. */
+export function setInitialCwd(tabId: string, cwd: string) { initialCwdMap.set(tabId, cwd); }
 
 function ensureReady(tabId: string): Promise<void> {
   let p = readyPromiseMap.get(tabId);
   if (!p) {
-    p = shell.ready(tabId).catch(() => {});
+    p = shell.ready(tabId, initialCwdMap.get(tabId)).catch(() => {});
+    initialCwdMap.delete(tabId);
     readyPromiseMap.set(tabId, p);
   }
   return p;

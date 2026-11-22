@@ -216,10 +216,10 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
                 if let Message::Text(text) = msg {
                     let cmd: Result<SessionCommand, _> = serde_json::from_str(&text);
                     match cmd {
-                        Ok(SessionCommand::Write { tab_id, data, command }) => {
+                        Ok(SessionCommand::Write { tab_id, data, command, cwd }) => {
                             let mut mgr = mgr.lock().await;
                             if mgr.write(&tab_id, &data, command.clone()).is_err() {
-                                if let Err(e) = mgr.open(tab_id.clone()) {
+                                if let Err(e) = mgr.open(tab_id.clone(), cwd) {
                                     error!("open session {}: {}", tab_id, e);
                                     continue;
                                 }

@@ -10,11 +10,12 @@ import { BlockMeta, BlockView, PresentationModeContext, CaptureModeContext } fro
 import { CommandIcon } from "@/components/daimon/CommandIcon";
 import { Composer } from "@/components/daimon/Composer";
 import { HistoryPanel } from "@/components/daimon/HistoryPanel";
-import { run, sendRaw, resizePty, notifyAltScreen, onAltScreenChange, onTuiChange, STREAMING_INTERACTIVE_RE, isStreamingSession, isDaimonified, abandonRun, finishRun, setNotifConfig, type Block, type State } from "@/lib/daimon/shell";
+import { run, sendRaw, resizePty, notifyAltScreen, onAltScreenChange, onTuiChange, STREAMING_INTERACTIVE_RE, isStreamingSession, isDaimonified, abandonRun, finishRun, setNotifConfig, setInitialCwd, type Block, type State } from "@/lib/daimon/shell";
 import { shell, onReconnect, type AttachInfo } from "@/lib/daimon/rpc";
 import { startBench } from "@/lib/daimon/bench";
 import { inTerminal } from "@/lib/daimon/tuiTerminal";
 import { displayPath, HOME, HOME_SEGS } from "@/lib/daimon/world";
+import { formatClock, now } from "@/lib/daimon/parse";
 import { LandingPage } from "@/components/daimon/LandingPage";
 import { CommandPalette } from "@/components/daimon/CommandPalette";
 import { GlobalSearch } from "@/components/daimon/GlobalSearch";
@@ -45,9 +46,6 @@ export const Route = createFileRoute("/")({
 });
 
 const START: State = { cwd: HOME_SEGS, ctx: { name: "" } };
-
-const now = () =>
-  new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 type Session = {
   id: string;
@@ -82,11 +80,11 @@ async function joinBlobs(blobs: Blob[], bg: string): Promise<Blob | null> {
   return new Promise(res => canvas.toBlob(res, "image/png"));
 }
 
-function makeSession(customName?: string): Session {
+function makeSession(customName?: string, cwd?: string[]): Session {
   const num = nextSessionNum++;
   const s: Session = {
     id: Math.random().toString(36).slice(2),
-    state: START,
+    state: cwd ? { ...START, cwd } : START,
     blocks: [],
     history: [],
     historyTs: [],
@@ -367,7 +365,7 @@ function Daimon() {
           input: r.input,
           cwd: r.cwd.split("/").filter(Boolean),
           ctx: r.ctx,
-          at: new Date(r.ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+          at: formatClock(new Date(r.ts)),
           ts: r.ts,
           ms: 0,
           code: r.exit_code,
@@ -684,7 +682,9 @@ function Daimon() {
   }, [activeId]);
 
   const newTab = () => {
-    const s = makeSession();
+    const active = sessions.find((s) => s.id === activeId);
+    const s = makeSession(undefined, active?.state.cwd);
+    if (active) setInitialCwd(s.id, "/" + active.state.cwd.join("/"));
     setSessions((prev) => [...prev, s]);
     setActiveId(s.id);
   };
@@ -903,7 +903,9 @@ function Daimon() {
       if (chord(e, false, "d")) {
         e.preventDefault();
         if (!splitSessionId) {
-          const s = makeSession();
+          const active = sessions.find((x) => x.id === activeId);
+          const s = makeSession(undefined, active?.state.cwd);
+          if (active) setInitialCwd(s.id, "/" + active.state.cwd.join("/"));
           setSessions((prev) => [...prev, s].map((x) => x.id === activeId ? { ...x, splitId: s.id } : x));
           setFocusedPane("right");
         } else {
@@ -1878,7 +1880,7 @@ function Daimon() {
         commands={[
           { id: "theme", label: "Toggle theme", description: theme === "light" ? "→ dracula" : "→ light", run: cycleTheme },
           { id: "new-session", label: "New session", description: "⌘T", run: () => { setPaletteOpen(false); newTab(); } },
-          { id: "split", label: "Split pane", description: "⌘D", run: () => { setPaletteOpen(false); if (!splitSessionId) { const s = makeSession(); setSessions((prev) => [...prev, s].map((x) => x.id === activeId ? { ...x, splitId: s.id } : x)); setFocusedPane("right"); } else { setSessions((prev) => prev.map((s) => s.id === activeId ? removeSplit(s) : s)); setFocusedPane("left"); } } },
+          { id: "split", label: "Split pane", description: "⌘D", run: () => { setPaletteOpen(false); if (!splitSessionId) { const active = sessions.find((x) => x.id === activeId); const s = makeSession(undefined, active?.state.cwd); if (active) setInitialCwd(s.id, "/" + active.state.cwd.join("/")); setSessions((prev) => [...prev, s].map((x) => x.id === activeId ? { ...x, splitId: s.id } : x)); setFocusedPane("right"); } else { setSessions((prev) => prev.map((s) => s.id === activeId ? removeSplit(s) : s)); setFocusedPane("left"); } } },
           { id: "search", label: "Search blocks", description: "⌘F", run: () => { setPaletteOpen(false); setSearchOpen(true); } },
           { id: "sidebar", label: "Toggle sidebar", description: "⌘B", run: () => { setPaletteOpen(false); document.dispatchEvent(new CustomEvent("toggle-sidebar")); } },
           { id: "keys", label: "Keyboard shortcuts", description: "⌘K", run: () => { setPaletteOpen(false); setKeysModalOpen(true); } },

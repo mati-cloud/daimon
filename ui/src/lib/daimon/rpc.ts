@@ -253,7 +253,7 @@ export const shell = {
     send({ type: "resize", tab_id: tabId, cols: c, rows: r });
     return Promise.resolve();
   },
-  ready:  (tabId: string) => { send({ type: "write", tab_id: tabId, data: "" }); return Promise.resolve(); },
+  ready:  (tabId: string, cwd?: string) => { send({ type: "write", tab_id: tabId, data: "", cwd }); return Promise.resolve(); },
   hasReady: (tabId: string) => lastContext.has(tabId),
   /** The last prompt context of a tab, if it has drawn a prompt. */
   context: (tabId: string): ShellContext | undefined => lastContext.get(tabId),

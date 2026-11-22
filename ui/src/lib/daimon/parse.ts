@@ -401,8 +401,13 @@ function paintsBg(s: string): boolean {
 // hyperlinks — anything that needs the html renderer.
 const hasColor = (s: string) => /\x1b\[[0-9;]*m|\x1b\]8;/.test(s);
 
-export const now = () =>
-  new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+export const formatClock = (d: Date) => {
+  const t = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true });
+  const zone = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" }).formatToParts(d).find((p) => p.type === "timeZoneName")?.value ?? "local";
+  return `${t} @ ${zone}`;
+};
+
+export const now = () => formatClock(new Date());
 
 /**
  * Whitespace removed, for comparing a line with the command it may echo. When the echo is wider
@@ -654,6 +659,27 @@ const tableRow = (starts: number[], l: string) =>
 // Valid table: every row has a non-empty first cell and a second column
 const tableRowOk = (r: string[]) => !!r[0] && r[1] !== undefined;
 
+/**
+ * Find a table that starts after an optional preamble (e.g. kubectl's "Syncing kubeconfig …"
+ * banner printed before `get nodes`). Scans the first few lines for a header whose every
+ * following non-blank line parses as a valid row. Returns the header, its rows, and how many
+ * preamble lines precede it. Smart, not hardcoded: no banner-string matching.
+ */
+function scanTable(lines: string[]): { head: string[]; rows: string[][]; preamble: number } | null {
+  const MAX_PREAMBLE = 5;
+  for (let i = 0; i < Math.min(MAX_PREAMBLE + 1, lines.length - 1); i++) {
+    const head = tableHeader(lines[i]!);
+    if (!head) continue;
+    const body = lines.slice(i + 1).filter(Boolean);
+    const rows = body.map((l) => tableRow(head.starts, l));
+    // Need real tabular data; ≥2 rows when there's a preamble keeps stray header-like lines out.
+    if (rows.length >= (i === 0 ? 1 : 2) && rows.every(tableRowOk)) {
+      return { head: head.names, rows, preamble: i };
+    }
+  }
+  return null;
+}
+
 const LOGFMT_RE = /^(\w[\w.-]*)=("(?:[^"\\]|\\.)*"|\S*)/;
 /** One logfmt line → its key/value pairs; null with fewer than two pairs. */
 function logfmtLine(l: string): Record<string, string> | null {
@@ -714,12 +740,12 @@ export function parse(rawText: string): Out[] {
 
   const lines = text.split("\n");
   if (lines.length >= 2) {
-    const head = tableHeader(lines[0]!);
-    if (head) {
-      const rows = lines.slice(1).filter(Boolean).map((l) => tableRow(head.starts, l));
-      if (rows.length > 0 && rows.every(tableRowOk)) {
-        return [{ kind: "table", head: head.names, rows, accentCol: head.names.length - 1 }];
-      }
+    const t = scanTable(lines);
+    if (t) {
+      const table: Out = { kind: "table", head: t.head, rows: t.rows, accentCol: t.head.length - 1 };
+      return t.preamble > 0
+        ? [{ kind: "lines", lines: lines.slice(0, t.preamble) }, table]
+        : [table];
     }
   }
 
@@ -854,8 +880,6 @@ export class OutputStream {
   private lines: string[] = [];
   private text = "";
   private ls: LsEntry[] = [];
-  private head: { starts: number[]; names: string[] } | null = null;
-  private rows: string[][] | null = null;   // null once a row doesn't fit the header
   private logfmt: Record<string, string>[] = [];
   private logfmtSeen = 0;
   private logfmtMark = false;
@@ -1103,13 +1127,14 @@ export class OutputStream {
     }
 
     if (count >= 2) {
-      const head = lines.length ? this.head : tableHeader(line0);
-      const rows = lines.length ? this.rows : [];
-      if (head && rows) {
-        const endRows = (lines.length ? end : end.slice(1)).filter(Boolean).map((l) => tableRow(head.starts, l));
-        if (rows.length + endRows.length > 0 && endRows.every(tableRowOk)) {
-          return [{ kind: "table", head: head.names, rows: [...rows, ...endRows], accentCol: head.names.length - 1 }];
-        }
+      // Scan the whole line set so a table printed after a preamble banner (e.g. kubectl's
+      // "Syncing kubeconfig …") is still caught; preamble lines become a leading lines block.
+      const t = scanTable([...lines, ...end]);
+      if (t) {
+        const table: Out = { kind: "table", head: t.head, rows: t.rows, accentCol: t.head.length - 1 };
+        return t.preamble > 0
+          ? [{ kind: "lines", lines: [...lines, ...end].slice(0, t.preamble) }, table]
+          : [table];
       }
     }
 
@@ -1145,16 +1170,9 @@ export class OutputStream {
   /** One more final line of the trimmed plain text. */
   private addLine(l: string): void {
     if (!this.lines.length) {
-      this.head = tableHeader(l);
-      this.rows = this.head ? [] : null;
       this.text = l;
     } else {
       this.text += "\n" + l;
-      if (this.rows && l) {
-        const row = tableRow(this.head!.starts, l);
-        if (tableRowOk(row)) this.rows.push(row);
-        else this.rows = null;
-      }
     }
     this.lines.push(l);
     const entry = lsEntry(l);

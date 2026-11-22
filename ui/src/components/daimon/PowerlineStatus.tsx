@@ -12,7 +12,7 @@ type Props = {
 // no fills or wedges. Hidden while nothing shows (`empty:hidden`).
 export function PowerlineStatus({ gitBranch, gitDirty, gitAdded, gitRemoved }: Props) {
   return (
-    <div className="flex items-center gap-5 px-6 pt-3 pb-1 font-mono text-[12px] leading-none empty:hidden">
+    <div className="flex items-center gap-5 px-6 pt-4 pb-1 font-mono text-[12px] leading-none empty:hidden">
       <StatusItemSlot variant="powerline" />
       {gitBranch && (
         <PowerlineSegment

@@ -38,7 +38,7 @@ pub enum SessionEvent {
 pub enum SessionCommand {
     /// Write raw bytes to the PTY (keystrokes, commands). `command`: the command line
     /// this write starts, remembered so a reattaching UI can label the running block.
-    Write { tab_id: String, data: String, #[serde(default)] command: Option<String> },
+    Write { tab_id: String, data: String, #[serde(default)] command: Option<String>, #[serde(default)] cwd: Option<String> },
     /// Reattach to a session (after the UI restarted): running command, output, context.
     Attach { req_id: String, tab_id: String },
     /// Make the running full-screen program repaint (after a reattach).
@@ -319,7 +319,7 @@ pub struct Session {
 impl Session {
     /// Spawn a new PTY session running the user's default shell.
     /// Streams output to `event_tx` until the shell exits.
-    pub fn spawn(tab_id: String, event_tx: mpsc::Sender<SessionEvent>) -> Result<Self> {
+    pub fn spawn(tab_id: String, event_tx: mpsc::Sender<SessionEvent>, cwd: Option<String>) -> Result<Self> {
         let pty_system = NativePtySystem::default();
         let pair = pty_system
             .openpty(PtySize { rows: 24, cols: 120, pixel_width: 0, pixel_height: 0 })
@@ -332,8 +332,13 @@ impl Session {
         if let Some(path) = crate::shell_env::inherited_path() {
             cmd.env("PATH", path);
         }
-        if let Some(home) = dirs::home_dir() {
-            cmd.cwd(home);
+        // Start in the given dir if it exists, else the user's home.
+        let start = cwd
+            .filter(|c| std::path::Path::new(c).is_dir())
+            .map(std::path::PathBuf::from)
+            .or_else(dirs::home_dir);
+        if let Some(dir) = start {
+            cmd.cwd(dir);
         }
         cmd.env("TERM", "xterm-256color");
         cmd.env("TERM_PROGRAM", "daimon");
@@ -574,8 +579,8 @@ impl SessionManager {
         Self { sessions: Default::default(), event_tx }
     }
 
-    pub fn open(&mut self, tab_id: String) -> Result<()> {
-        let session = Session::spawn(tab_id.clone(), self.event_tx.clone())?;
+    pub fn open(&mut self, tab_id: String, cwd: Option<String>) -> Result<()> {
+        let session = Session::spawn(tab_id.clone(), self.event_tx.clone(), cwd)?;
         self.sessions.insert(tab_id, session);
         Ok(())
     }
@@ -647,7 +652,7 @@ mod tests {
     #[tokio::test]
     async fn tty_raw_follows_icanon() {
         let (tx, _rx) = mpsc::channel(1024);
-        let s = Session::spawn("tab-raw".into(), tx).unwrap();
+        let s = Session::spawn("tab-raw".into(), tx, None).unwrap();
         let wait = || tokio::time::sleep(std::time::Duration::from_millis(800));
         wait().await;
         s.write("sleep 2\n", None).unwrap();
@@ -663,7 +668,7 @@ mod tests {
     #[tokio::test]
     async fn session_spawns_and_exits() {
         let (tx, mut rx) = mpsc::channel(64);
-        let session = Session::spawn("tab-1".into(), tx).unwrap();
+        let session = Session::spawn("tab-1".into(), tx, None).unwrap();
 
         // Run a quick command and exit
         session.write("echo hello_daimon\nexit\n", None).unwrap();
@@ -696,8 +701,8 @@ mod tests {
         let (tx1, mut rx1) = mpsc::channel(64);
         let (tx2, mut rx2) = mpsc::channel(64);
 
-        let s1 = Session::spawn("tab-1".into(), tx1).unwrap();
-        let s2 = Session::spawn("tab-2".into(), tx2).unwrap();
+        let s1 = Session::spawn("tab-1".into(), tx1, None).unwrap();
+        let s2 = Session::spawn("tab-2".into(), tx2, None).unwrap();
 
         s1.write("echo from_tab_1\nexit\n", None).unwrap();
         s2.write("echo from_tab_2\nexit\n", None).unwrap();
