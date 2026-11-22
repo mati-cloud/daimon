@@ -343,11 +343,10 @@ pub async fn exec(
     // Audit trail: every program a plugin runs.
     tracing::info!("plugin exec: {cmd}");
     let mut c = tokio::process::Command::new(&cmd);
-    c.args(&args)
-        .env("PATH", crate::shell_env::path())
-        .envs(env)
-        .stdin(std::process::Stdio::null())
-        .kill_on_drop(true);
+    c.args(&args).stdin(std::process::Stdio::null()).kill_on_drop(true);
+    c.env("PATH", crate::shell_env::path());
+    if let Some(home) = dirs::home_dir() { c.env("HOME", home); }
+    c.envs(env); // plugin-supplied vars override defaults above
     if let Some(dir) = cwd.filter(|d| !d.is_empty()) {
         c.current_dir(dir);
     }
