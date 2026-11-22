@@ -12,6 +12,7 @@ import { shell } from "@/lib/daimon/rpc";
 import { sendRaw, resizePty, getTuiReplayBuffer, getAltScreen, onAltScreenChange, takeRedraw, STREAMING_INTERACTIVE_RE, abandonRun, looksLikeYaml, splitHtmlLines } from "@/lib/daimon/shell";
 import type { Block, Out, LsEntry, GitStatusFile, GitBranchNode, GitLogRef } from "@/lib/daimon/shell";
 import { inTerminal, mountTui, writeClipboard, type TuiTerminal } from "@/lib/daimon/tuiTerminal";
+import { applySpec, useSpecsVersion } from "@/lib/daimon/specs";
 import hljs from "highlight.js/lib/core";
 import hljsBash from "highlight.js/lib/languages/bash";
 import hljsJson from "highlight.js/lib/languages/json";
@@ -2620,10 +2621,19 @@ function SearchableOutput({ html, htmlLines, lines, tone, pm, onSearch, onPathCl
 
 function OutView({ out: rawOut, input = "", ctx = "", cwd, isLast = false, onSearch, onPathClick }: { out: Out; input?: string; ctx?: string; cwd?: string; isLast?: boolean; onSearch?: ((q: string) => void) | null; onPathClick?: (path: string) => void }) {
   const pm = useContext(PresentationModeContext);
+  // A user spec (~/.config/daimon/specs/) may claim a command's plaintext output and recast it
+  // as a table/pairs/lines block. Only plain text is offered; structured kinds pass through.
+  const specVer = useSpecsVersion();
+  const specced = useMemo(() => {
+    if (rawOut.kind !== "lines" && rawOut.kind !== "ansi") return rawOut;
+    const text = rawOut.kind === "lines" ? rawOut.lines.join("\n") : rawOut.html.replace(/<[^>]+>/g, "");
+    return applySpec(input, text) ?? rawOut;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawOut, input, specVer]);
   // Content-based redaction at the render boundary: scrub secrets from the parsed output for
   // EVERY kind in one place when presentation mode is on. Non-destructive — the stored block is
   // untouched, so toggling presentation mode off restores the raw output.
-  const out = pm ? redactOut(rawOut) : rawOut;
+  const out = pm ? redactOut(specced) : specced;
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const kubeDescribeInfo = parseKubeCmd(input);
 

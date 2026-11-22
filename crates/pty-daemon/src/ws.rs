@@ -137,6 +137,7 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
     });
 
     tokio::spawn(crate::plugins::watch(event_tx.clone()));
+    tokio::spawn(crate::specs::watch(event_tx.clone()));
     let db_prune = db.clone();
     tokio::spawn(async move {
         let mut hourly = tokio::time::interval(Duration::from_secs(60 * 60));
@@ -469,6 +470,13 @@ pub async fn serve(listener: TcpListener, db: Store, token: String, port: u16) -
                             let tx = client_tx.clone();
                             tokio::task::spawn_blocking(move || {
                                 let data = crate::plugins::list();
+                                let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
+                            });
+                        }
+                        Ok(SessionCommand::SpecList { req_id }) => {
+                            let tx = client_tx.clone();
+                            tokio::task::spawn_blocking(move || {
+                                let data = crate::specs::list();
                                 let _ = tx.blocking_send(SessionEvent::Response { req_id, ok: true, data });
                             });
                         }

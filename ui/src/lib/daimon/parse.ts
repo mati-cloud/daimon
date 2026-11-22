@@ -639,7 +639,7 @@ function lsEntry(line: string): LsEntry | null {
  * Position-based: find where each header word starts. This handles kubectl-style headers with
  * multi-word column names like "NOMINATED NODE" and "READINESS GATES" that share a single space.
  */
-function tableHeader(firstLine: string): { starts: number[]; names: string[] } | null {
+export function tableHeader(firstLine: string): { starts: number[]; names: string[] } | null {
   // Skip help/usage text: section headers end with ":" or first line is indented
   if (firstLine.trimStart() !== firstLine || firstLine.trimEnd().endsWith(":")) return null;
   const starts: number[] = [];
@@ -654,7 +654,7 @@ function tableHeader(firstLine: string): { starts: number[]; names: string[] } |
   return names.length >= 2 ? { starts, names } : null;
 }
 /** Slice a row by the header's column start positions. */
-const tableRow = (starts: number[], l: string) =>
+export const tableRow = (starts: number[], l: string) =>
   starts.map((start, i) => l.slice(start, starts[i + 1] ?? l.length).trim());
 // Valid table: every row has a non-empty first cell and a second column
 const tableRowOk = (r: string[]) => !!r[0] && r[1] !== undefined;

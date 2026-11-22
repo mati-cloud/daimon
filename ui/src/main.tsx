@@ -8,6 +8,7 @@ import "./styles.css";
 import { applyGlass, loadGlass } from "./lib/daimon/appearance";
 import { installMagnify } from "./lib/daimon/magnify";
 import { loadPlugins } from "./lib/daimon/plugins";
+import { loadSpecs } from "./lib/daimon/specs";
 import { openInBrowser } from "./lib/daimon/rpc";
 import { toast } from "sonner";
 
@@ -90,3 +91,4 @@ createRoot(document.getElementById("root")!).render(
 );
 
 void loadPlugins();
+void loadSpecs();

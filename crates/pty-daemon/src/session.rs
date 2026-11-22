@@ -30,6 +30,8 @@ pub enum SessionEvent {
     Response { req_id: String, ok: bool, data: serde_json::Value },
     /// A file in ~/.config/daimon/plugins/ was added, changed or removed.
     PluginsChanged,
+    /// A file in ~/.config/daimon/specs/ was added, changed or removed.
+    SpecsChanged,
 }
 
 /// Messages sent frontend → WebSocket → session.
@@ -100,6 +102,8 @@ pub enum SessionCommand {
     PrefGet { req_id: String, key: String },
     /// Every runtime UI plugin in ~/.config/daimon/plugins/ (source only if approved).
     PluginList { req_id: String },
+    /// Every declarative output spec in ~/.config/daimon/specs/ (data-only, no gate).
+    SpecList { req_id: String },
     /// Approve a plugin as its file is now, behind an OS admin prompt.
     PluginApprove { req_id: String, name: String },
     /// Rename a plugin file out of the way (`.<file>.quarantined`) so it never loads.

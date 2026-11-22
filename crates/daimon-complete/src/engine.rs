@@ -59,6 +59,7 @@ pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<S
     let mut subcommands = &spec.subcommands;
     let mut flags = &spec.flags;
     let mut args = &spec.args;
+    let mut no_fallback = spec.no_file_fallback;
     let mut sub_depth = 1usize;
 
     while sub_depth < idx {
@@ -67,6 +68,7 @@ pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<S
             subcommands = &sub.subcommands;
             flags = &sub.flags;
             args = &sub.args;
+            no_fallback = sub.no_file_fallback;
             sub_depth += 1;
         } else {
             break;
@@ -90,14 +92,21 @@ pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<S
         return out;
     }
 
-    // Subcommand completions at the right depth
+    // Subcommand completions at the right depth. A tool whose first positional is itself
+    // completable (and that also accepts subcommands at this position) merges those arg
+    // suggestions in, so position 1 offers subcommands ∪ args, like the tool itself.
     if sub_depth == idx {
         for s in subcommands {
             if s.name.starts_with(&partial) {
                 out.push(Suggestion { text: s.name.clone(), description: s.description.clone(), kind: SuggestionKind::Subcommand });
             }
         }
-        if !out.is_empty() { return out; }
+        if !out.is_empty() {
+            if let Some(arg) = args.first() {
+                out.extend(complete_arg(&arg.kind, &partial, cwd, remote));
+            }
+            return out;
+        }
     }
 
     // Arg completions based on arg kind
@@ -109,6 +118,11 @@ pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<S
         return complete_arg(&arg.kind, &partial, cwd, remote);
     }
 
+    // No declared arg covers this position. A tool that takes no file args suppresses the
+    // filesystem fallback so the prompt doesn't list the cwd.
+    if no_fallback {
+        return out;
+    }
     // Last resort: filesystem
     filesystem_completions(&partial, cwd, false, remote)
 }
@@ -123,6 +137,9 @@ fn complete_arg(kind: &ArgKind, partial: &str, cwd: &str, remote: Option<&Listin
             .filter(|c| c.starts_with(partial))
             .map(|c| Suggestion { text: c.clone(), description: None, kind: SuggestionKind::Choice })
             .collect(),
+        // Can't run a completer command for a shell on another machine.
+        ArgKind::Command { .. } if remote.is_some() => vec![],
+        ArgKind::Command { command, split } => command_choices(command, split, partial, cwd),
         ArgKind::GitBranch  => git_refs(partial, cwd, GitRefKind::Branch),
         ArgKind::GitTag     => git_refs(partial, cwd, GitRefKind::Tag),
         ArgKind::GitRemote  => git_refs(partial, cwd, GitRefKind::Remote),
@@ -131,7 +148,55 @@ fn complete_arg(kind: &ArgKind, partial: &str, cwd: &str, remote: Option<&Listin
     }
 }
 
-/// `~` / `~/…` → the home directory, for reading the disk; suggestions keep what was typed.
+/// Run a user-declared completer command in `cwd`, split stdout, filter by `partial`.
+/// Killed after ~1s so a slow/hung completer can't stall completion. Output capped.
+fn command_choices(command: &[String], split: &str, partial: &str, cwd: &str) -> Vec<Suggestion> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    let Some((prog, args)) = command.split_first() else { return vec![] };
+    let Ok(mut child) = Command::new(prog)
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return vec![];
+    };
+
+    let deadline = Instant::now() + Duration::from_millis(1000);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return vec![];
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Err(_) => return vec![],
+        }
+    }
+
+    let Ok(out) = child.wait_with_output() else { return vec![] };
+    let raw = if out.stdout.len() > 1 << 20 { &out.stdout[..1 << 20] } else { &out.stdout[..] }; // cap 1 MiB
+    let text = String::from_utf8_lossy(raw);
+
+    let items: Vec<&str> = if split == "lines" {
+        text.lines().map(str::trim).collect()
+    } else {
+        text.split_whitespace().collect()
+    };
+    items
+        .into_iter()
+        .filter(|c| !c.is_empty() && c.starts_with(partial))
+        .map(|c| Suggestion { text: c.to_string(), description: None, kind: SuggestionKind::Choice })
+        .collect()
+}
+
+
 fn expand_tilde(path: &str) -> std::path::PathBuf {
     let home = || std::env::var_os("HOME").map(std::path::PathBuf::from);
     match path.strip_prefix('~') {
@@ -246,6 +311,21 @@ mod fs_tests {
         assert_eq!(texts("~/s", "/"), ["~/sub/"]);
         assert_eq!(texts("~", "/"), ["~/"]);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn command_choices_runs_splits_and_filters() {
+        let out = command_choices(
+            &["printf".into(), "na-us-1 ap-jp-2 eu-nl-1".into()],
+            "whitespace",
+            "ap",
+            "/tmp",
+        );
+        assert_eq!(out.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(), ["ap-jp-2"]);
+        assert!(matches!(out[0].kind, SuggestionKind::Choice));
+
+        // missing binary yields nothing, never panics
+        assert!(command_choices(&["definitely-not-a-binary-xyz".into()], "whitespace", "", "/tmp").is_empty());
     }
 }
 

@@ -12,6 +12,10 @@ pub struct Spec {
     pub flags: Vec<Flag>,
     #[serde(default)]
     pub args: Vec<Arg>,
+    /// Don't fall back to filesystem completion at a position no declared arg covers.
+    /// For tools that take no file arguments (e.g. `df`), so the prompt doesn't list files.
+    #[serde(default)]
+    pub no_file_fallback: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +31,9 @@ pub struct Subcommand {
     pub flags: Vec<Flag>,
     #[serde(default)]
     pub args: Vec<Arg>,
+    /// See `Spec::no_file_fallback`.
+    #[serde(default)]
+    pub no_file_fallback: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +69,14 @@ pub enum ArgKind {
     Dir,
     /// Fixed set of choices.
     Choice { choices: Vec<String> },
+    /// Choices produced by running a command in the cwd and splitting its stdout.
+    /// `split` defaults to "whitespace" ("lines" keeps whole lines). Use the real binary,
+    /// not a shell wrapper whose stdout gets sourced/eval'd by the shell.
+    Command {
+        command: Vec<String>,
+        #[serde(default = "default_split")]
+        split: String,
+    },
     /// Git branch names.
     GitBranch,
     /// Git tag names.
@@ -77,3 +92,5 @@ pub enum ArgKind {
 impl Default for ArgKind {
     fn default() -> Self { Self::String }
 }
+
+fn default_split() -> String { "whitespace".to_string() }

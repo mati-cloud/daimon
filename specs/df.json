@@ -1,0 +1,24 @@
+{
+  "name": "df",
+  "completion": {
+    "name": "df",
+    "description": "Report file system disk space usage",
+    "no_file_fallback": true,
+    "flags": [
+      { "name": "--human-readable", "short": "-h", "description": "Sizes in powers of 1024" },
+      { "name": "--si", "short": "-H", "description": "Sizes in powers of 1000" },
+      { "name": "--inodes", "short": "-i", "description": "List inode information" },
+      { "name": "--local", "short": "-l", "description": "Local file systems only" },
+      { "name": "--type", "short": "-T", "description": "Print file system type" }
+    ]
+  },
+  "output": {
+    "match": { "command": "^df(\\s|$)" },
+    "render": {
+      "kind": "table",
+      "columns": ["Filesystem", "Size", "Used", "Avail", "Use%", "Mounted on"],
+      "split": "fields",
+      "skipHeader": true
+    }
+  }
+}

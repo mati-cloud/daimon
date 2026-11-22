@@ -8,6 +8,7 @@ mod link_preview;
 mod plugins;
 mod session;
 mod shell_env;
+mod specs;
 mod store;
 mod ws;
 

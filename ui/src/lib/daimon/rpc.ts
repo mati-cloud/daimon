@@ -21,6 +21,9 @@ export type PluginEntry = {
   reason?: string;
   source?: string;
 };
+
+/** A declarative output spec as the daemon reports it (data-only JSON, see specs.rs). */
+export type SpecEntry = { name: string; file: string; source: string };
 const CREDS_KEY = "daimon-daemon";
 
 function credsFromUrl(): Creds | null {
@@ -66,7 +69,8 @@ type DaemonEvent =
   | { type: "altScreenEnter"; tab_id: string }
   | { type: "altScreenExit"; tab_id: string }
   | { type: "response"; req_id: string; ok: boolean; data: unknown }
-  | { type: "pluginsChanged" };
+  | { type: "pluginsChanged" }
+  | { type: "specsChanged" };
 
 type OutputListener        = (tabId: string, data: string) => void;
 type ExitListener          = (tabId: string, code: number) => void;
@@ -168,6 +172,8 @@ async function connect() {
       altScreenListeners.forEach((fn) => fn(ev.tab_id, false));
     } else if (ev.type === "pluginsChanged") {
       pluginsChangedListeners.forEach((fn) => fn());
+    } else if (ev.type === "specsChanged") {
+      specsChangedListeners.forEach((fn) => fn());
     } else if (ev.type === "response") {
       const p = pendingRequests.get(ev.req_id);
       if (p) {
@@ -211,6 +217,7 @@ export type AttachInfo = {
 type AltScreenListener = (tabId: string, enter: boolean) => void;
 const altScreenListeners = new Set<AltScreenListener>();
 const pluginsChangedListeners = new Set<() => void>();
+const specsChangedListeners = new Set<() => void>();
 
 export function openInBrowser(url: string) {
   (window as { __electrobunSendToHost?: (m: unknown) => void }).__electrobunSendToHost?.({ type: "openUrl", url });
@@ -225,6 +232,8 @@ export const shell = {
   onAltScreen:    (fn: AltScreenListener)    => { altScreenListeners.add(fn);     return () => altScreenListeners.delete(fn); },
   /** A file in ~/.config/daimon/plugins/ changed (the daemon watches the folder). */
   onPluginsChanged: (fn: () => void)         => { pluginsChangedListeners.add(fn); return () => pluginsChangedListeners.delete(fn); },
+  /** A file in ~/.config/daimon/specs/ changed (the daemon watches the folder). */
+  onSpecsChanged:   (fn: () => void)         => { specsChangedListeners.add(fn);   return () => specsChangedListeners.delete(fn); },
 
   write:  (tabId: string, data: string) => { send({ type: "write", tab_id: tabId, data }); return Promise.resolve(); },
   /** Make a resumed full-screen program repaint (resize dance → SIGWINCH). */
@@ -303,6 +312,8 @@ export const shell = {
   /** `plugins`: plugin protocol version; missing on daemons that predate plugins. */
   daemonInfo:          () => request<{ build: string; sessions: number; pid: number; plugins?: number }>({ type: "daemonInfo" }, 15000),
   pluginList:          () => request<PluginEntry[]>({ type: "pluginList" }, 15000),
+  /** Declarative output specs in ~/.config/daimon/specs/ (data-only, always served). */
+  specList:            () => request<SpecEntry[]>({ type: "specList" }, 15000),
   /** Approve a plugin as its file is now. The daemon shows the OS admin prompt; waits for the user. */
   pluginApprove:       (name: string) => request<{ approved: boolean; error?: string; command?: string }>({ type: "pluginApprove", name }, 10 * 60_000),
   /** Rename a blocked plugin to `.<file>.quarantined` so it never loads. */

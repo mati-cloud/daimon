@@ -142,3 +142,13 @@ fn git_add_returns_dirty_files() {
     assert!(!r.is_empty(), "git add returned no dirty files in {root:?}");
     assert!(r.iter().all(|s| matches!(s.kind, SuggestionKind::File | SuggestionKind::Dir)));
 }
+
+#[test]
+fn df_takes_no_file_args() {
+    // df declares no_file_fallback, so `df ` must not list the cwd's files.
+    let cwd = env!("CARGO_MANIFEST_DIR");
+    assert!(complete("df ", cwd).is_empty(), "df should offer no positional completions");
+    // Its flags still complete.
+    let flags = complete("df -", cwd);
+    assert!(!flags.is_empty() && flags.iter().all(|s| matches!(s.kind, SuggestionKind::Flag)));
+}
