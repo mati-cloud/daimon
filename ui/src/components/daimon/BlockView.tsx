@@ -1063,28 +1063,7 @@ function BlockDuration({ block }: { block: Block }) {
   return <span ref={ref}>{fmtDuration(live && ts != null ? Date.now() - ts : block.ms)}</span>;
 }
 
-/** Copy a block's command and its output (as plain text) to the clipboard. */
-function copyBlock(block: Block) {
-  const text = block.out
-    .flatMap((o) =>
-      o.kind === "lines" ? o.lines :
-      o.kind === "ansi" ? [o.html.replace(/<[^>]+>/g, "")] :
-      o.kind === "pairs" ? o.pairs.map(([k, v]) => `${k}: ${v}`) :
-      o.kind === "table" ? [o.head.join("\t"), ...o.rows.map((r) => r.join("\t"))] :
-      o.kind === "gitlog" ? o.entries.map((e) => `${e.fullHash} ${e.date} ${e.subject} ${e.author}`) :
-      o.kind === "gitbranches" ? o.branches.map((b) => b === o.current ? `* ${b}` : `  ${b}`) :
-      o.kind === "gitdiff" ? o.raw.split("\n") :
-      o.kind === "logfmt" ? o.lines.map((f) => Object.entries(f).map(([k, v]) => `${k}=${v}`).join(" ")) :
-      o.kind === "pretty" ? [o.text] :
-      []
-    )
-    .join("\n");
-  const full = `$ ${block.input}\n${text}`.trimEnd();
-  navigator.clipboard.writeText(full);
-  toast.success(`Copied: ${full.slice(0, 80)}${full.length > 80 ? "…" : ""}`);
-}
-
-/** Exit code (if failed), duration, start time and copy button — a block's header meta, also shown in the session header. */
+/** Exit code (if failed), duration, start time — a block's header meta, also shown in the session header. */
 export function BlockMeta({ block, className = "" }: { block: Block; className?: string }) {
   const failed = !block.pending && block.code !== 0;
   return (
@@ -1092,18 +1071,6 @@ export function BlockMeta({ block, className = "" }: { block: Block; className?:
       {failed && <span className="text-alarm/80">exit {block.code}</span>}
       <BlockDuration block={block} />
       <span title={block.ts ? stampTitle(block.ts) : undefined}>{block.at}</span>
-      {block.out.length > 0 && (
-        <button
-          onClick={() => copyBlock(block)}
-          title="Copy output"
-          className="transition-opacity rounded p-0.5 hover:bg-secondary"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
-        </button>
-      )}
     </span>
   );
 }

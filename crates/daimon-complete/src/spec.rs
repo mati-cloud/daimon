@@ -70,8 +70,9 @@ pub enum ArgKind {
     /// Fixed set of choices.
     Choice { choices: Vec<String> },
     /// Choices produced by running a command in the cwd and splitting its stdout.
-    /// `split` defaults to "whitespace" ("lines" keeps whole lines). Use the real binary,
-    /// not a shell wrapper whose stdout gets sourced/eval'd by the shell.
+    /// `split` defaults to "whitespace"; "lines" keeps whole lines and reads an optional
+    /// tab-separated description per line (`value<TAB>description`), shown inline.
+    /// Use the real binary, not a shell wrapper whose stdout gets sourced/eval'd.
     Command {
         command: Vec<String>,
         #[serde(default = "default_split")]

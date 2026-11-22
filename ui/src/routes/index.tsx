@@ -278,15 +278,22 @@ function Daimon() {
         // on-page node. `.capturing` on <html> hides the C/I/O hint row (CSS, synchronous — flipping
         // the React prop lags a frame behind the capture).
         document.documentElement.classList.add("capturing");
+        // Temporarily make nodes overflow-visible so scrollWidth reflects full content (not viewport clip).
+        const prevOverflow = new Map<HTMLElement, string>();
+        for (const n of nodes) { prevOverflow.set(n, n.style.overflow); n.style.overflow = "visible"; }
         // Widen each node to its full content width so long/unbreakable lines (PATH, FPATH) are
         // captured in full instead of clipped at the viewport-width node box. Restored in finally.
         for (const n of nodes) { prevWidth.set(n, n.style.width); n.style.width = `${n.scrollWidth}px`; }
         await new Promise(res => requestAnimationFrame(res)); // let the widened layout settle
 
         const bg = getComputedStyle(document.documentElement).getPropertyValue("--background").trim() || "#0b0b0f";
-        const opts = { pixelRatio: 2, backgroundColor: bg, style: { padding: "24px 28px", background: bg } };
+        const PAD = 28; // px each side
         const blobs: (Blob | null)[] = [];
-        for (const n of nodes) blobs.push(await toBlob(n, opts));
+        for (const n of nodes) {
+          const w = n.scrollWidth + PAD * 2;
+          const opts = { pixelRatio: 2, backgroundColor: bg, width: w, style: { overflow: "visible", padding: `24px ${PAD}px`, background: bg } };
+          blobs.push(await toBlob(n, opts));
+        }
         const ok = blobs.filter((b): b is Blob => !!b);
         if (cancelled || !ok.length) return;
         const blob = ok.length === 1 ? ok[0]! : await joinBlobs(ok, bg);
@@ -306,6 +313,7 @@ function Daimon() {
         console.warn("[screenshot] capture failed:", err);
         toast.error("Screenshot failed");
       } finally {
+        prevOverflow.forEach((v, n) => { n.style.overflow = v; });
         prevWidth.forEach((w, n) => { n.style.width = w; });
         document.documentElement.classList.remove("capturing");
         if (!cancelled) setCaptureReq(null);

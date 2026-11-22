@@ -184,15 +184,25 @@ fn command_choices(command: &[String], split: &str, partial: &str, cwd: &str) ->
     let raw = if out.stdout.len() > 1 << 20 { &out.stdout[..1 << 20] } else { &out.stdout[..] }; // cap 1 MiB
     let text = String::from_utf8_lossy(raw);
 
-    let items: Vec<&str> = if split == "lines" {
-        text.lines().map(str::trim).collect()
+    // whitespace: each token is a value. lines: each line is `value` or `value<TAB>description`,
+    // so a completer can annotate its choices (shown inline like subcommand descriptions).
+    let rows: Vec<(&str, Option<&str>)> = if split == "lines" {
+        text.lines()
+            .map(|l| match l.split_once('\t') {
+                Some((v, d)) => (v.trim(), Some(d.trim())),
+                None => (l.trim(), None),
+            })
+            .collect()
     } else {
-        text.split_whitespace().collect()
+        text.split_whitespace().map(|v| (v, None)).collect()
     };
-    items
-        .into_iter()
-        .filter(|c| !c.is_empty() && c.starts_with(partial))
-        .map(|c| Suggestion { text: c.to_string(), description: None, kind: SuggestionKind::Choice })
+    rows.into_iter()
+        .filter(|(v, _)| !v.is_empty() && v.starts_with(partial))
+        .map(|(v, d)| Suggestion {
+            text: v.to_string(),
+            description: d.filter(|s| !s.is_empty()).map(str::to_string),
+            kind: SuggestionKind::Choice,
+        })
         .collect()
 }
 
@@ -323,6 +333,18 @@ mod fs_tests {
         );
         assert_eq!(out.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(), ["ap-jp-2"]);
         assert!(matches!(out[0].kind, SuggestionKind::Choice));
+
+        // lines split reads an optional tab-separated description per line
+        let out = command_choices(
+            &["printf".into(), "eu-de-1\\tFrankfurt\\neu-nl-1\\tAmsterdam\\n".into()],
+            "lines",
+            "eu",
+            "/tmp",
+        );
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].text, "eu-de-1");
+        assert_eq!(out[0].description.as_deref(), Some("Frankfurt"));
+        assert_eq!(out[1].description.as_deref(), Some("Amsterdam"));
 
         // missing binary yields nothing, never panics
         assert!(command_choices(&["definitely-not-a-binary-xyz".into()], "whitespace", "", "/tmp").is_empty());
