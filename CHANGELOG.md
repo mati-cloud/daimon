@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/mati-cloud/daimon/compare/v0.14.0...v0.14.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **shell:** skip sigint cleanup when alt-screen app is active ([e336391](https://github.com/mati-cloud/daimon/commit/e336391944ea21c59944cb0ce0045f1c3a7c4b8e))
+
 ## [0.14.0](https://github.com/mati-cloud/daimon/compare/v0.13.0...v0.14.0) (2026-11-23)
 
 
