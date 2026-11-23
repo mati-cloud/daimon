@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/mati-cloud/daimon/compare/v0.12.0...v0.13.0) (2026-11-23)
+
+
+### Features
+
+* **ui,plugins,git:** register plugin settings panels and display author email in logs ([5fb2a73](https://github.com/mati-cloud/daimon/commit/5fb2a73fbae4a63c6a7b8f8ff4cff974fa6bb099))
+
 ## [0.12.0](https://github.com/mati-cloud/daimon/compare/v0.11.0...v0.12.0) (2026-11-23)
 
 
