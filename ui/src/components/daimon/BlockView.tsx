@@ -2715,14 +2715,17 @@ function OutView({ out: rawOut, input = "", ctx = "", cwd, isLast = false, onSea
 /** Collapsed output clamp; output taller than this is "long" and becomes collapsible. */
 const COLLAPSED_MAX_PX = 320;
 
-/** Terminal background resolved from CSS --background at call time (theme-aware). */
+/** Terminal background resolved from CSS --background at call time (theme-aware). Returns #rrggbb. */
 function tuiBg(): string {
   const el = document.createElement("div");
   el.style.cssText = "position:fixed;visibility:hidden;background-color:var(--background)";
   document.body.appendChild(el);
   const color = getComputedStyle(el).backgroundColor;
   document.body.removeChild(el);
-  return color || "#0d1117";
+  // Wraith requires #rrggbb; computed style returns rgb(...) — convert it.
+  const m = color.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+  if (m) return "#" + [m[1], m[2], m[3]].map((n) => parseInt(n).toString(16).padStart(2, "0")).join("");
+  return color.startsWith("#") ? color : "#0d1117";
 }
 
 /** Plain text of the outputs that can carry URLs (raw lines and ANSI html, tags and entities dropped). */

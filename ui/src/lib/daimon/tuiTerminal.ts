@@ -256,6 +256,26 @@ function mountXterm(el: HTMLElement, opts: TuiOptions): TuiTerminal {
   ro.observe(el);
   fit();
 
+  // Track kitty keyboard protocol stack. Apps push/pop with CSI = / CSI < and enable/disable
+  // with CSI > / CSI <. When active, Shift+Enter must be encoded as \x1b[13;2u — xterm doesn't
+  // implement this protocol so we intercept and emit it ourselves.
+  let kittyDepth = 0;
+  const KITTY_PUSH_RE  = /\x1b\[=\d*u/g;  // CSI = Pu  (push)
+  const KITTY_POP_RE   = /\x1b\[<\d*u/g;  // CSI < Pu  (pop / disable-with-flags)
+  const KITTY_SET_RE   = /\x1b\[>\d*u/g;  // CSI > Pu  (set/enable — depth 0→1)
+
+  const dataListeners = new Set<(data: string) => void>();
+
+  term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+    if (kittyDepth <= 0) return true;
+    if (e.type !== "keydown") return true;
+    if (e.key === "Enter" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (e.type === "keydown") dataListeners.forEach((l) => l("\x1b[13;2u"));
+      return false; // suppress xterm's default \r
+    }
+    return true;
+  });
+
   let disposed = false;
   return {
     get kind() { return kind; },
@@ -263,12 +283,22 @@ function mountXterm(el: HTMLElement, opts: TuiOptions): TuiTerminal {
     get rows() { return term.rows; },
     write: (data) => new Promise<void>((resolve, reject) => {
       if (disposed) return reject(new Error("terminal disposed"));
+      // Track kitty keyboard protocol depth so Shift+Enter can be re-encoded.
+      const pushes = (data.match(KITTY_PUSH_RE) ?? []).length;
+      const pops   = (data.match(KITTY_POP_RE)  ?? []).length;
+      const sets   = (data.match(KITTY_SET_RE)   ?? []).length;
+      if (sets  > 0 && kittyDepth === 0) kittyDepth = 1;
+      kittyDepth = Math.max(0, kittyDepth + pushes - pops);
       term.write(data, resolve);
     }),
     paste: (text) => { term.paste(text); return Promise.resolve(); },
     fit,
     focus: () => term.focus(),
-    onData: (l) => term.onData(l),
+    onData: (l) => {
+      dataListeners.add(l);
+      const sub = term.onData(l);
+      return { dispose: () => { dataListeners.delete(l); sub.dispose(); } };
+    },
     onResize: (l) => term.onResize(l),
     onError: () => ({ dispose() {} }), // nothing asynchronous to report
     onTitleChange: (l) => term.onTitleChange(l),
@@ -284,6 +314,8 @@ function mountXterm(el: HTMLElement, opts: TuiOptions): TuiTerminal {
     dispose: async () => {
       if (disposed) return;
       disposed = true;
+      kittyDepth = 0;
+      dataListeners.clear();
       ro.disconnect();
       webgl?.dispose();
       term.dispose();

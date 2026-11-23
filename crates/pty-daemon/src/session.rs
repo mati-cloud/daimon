@@ -2,6 +2,8 @@
 /// No shared mutable state between sessions — the compiler enforces this.
 
 use anyhow::{Context, Result};
+#[cfg(unix)]
+use libc;
 use crate::integration::Shell;
 use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use serde::{Deserialize, Serialize};
@@ -806,7 +808,13 @@ impl SessionManager {
     }
 
     pub fn close(&mut self, tab_id: &str) {
-        self.sessions.remove(tab_id);
+        if let Some(session) = self.sessions.remove(tab_id) {
+            // Force-kill the shell's process group so any running commands die immediately.
+            #[cfg(unix)]
+            if let Some(pid) = session._shell_pid {
+                unsafe { libc::killpg(pid as libc::pid_t, libc::SIGKILL); }
+            }
+        }
     }
 }
 

@@ -318,7 +318,7 @@ export function takeRedraw(tabId: string): boolean {
 }
 
 export function sendRaw(tabId: string, data: string) {
-  if (data === "\x03") {
+  if (data === "\x03" && !isAltScreen(tabId)) {
     lastInterruptAt.set(tabId, Date.now());
     interruptCallbackMap.get(tabId)?.();
   }
@@ -477,7 +477,9 @@ export async function run(
 
   // Rewrite git diff/show/log to use --no-pager so less never launches
   const noPagerRewrite = input.replace(/^(git)\s+(diff|show|log|blame)(\s|$)/, "git --no-pager $2$3");
-  const effectiveInput = noPagerRewrite !== input ? noPagerRewrite : input;
+  // Strip shell comment lines — zsh fed via PTY write doesn't treat # as a comment mid-script.
+  const stripped = noPagerRewrite.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+  const effectiveInput = stripped;
 
   const t0 = resume?.startedAt || Date.now();
   // Duration is measured from the shell's command-start marker to its end marker, not from
@@ -614,9 +616,8 @@ export async function run(
     globalOutputOff?.(); globalContextOff?.(); globalExitOff?.(); globalCommandStartOff?.();
 
     // Arm the sigint cleanup timer immediately when Ctrl+C is sent — don't wait for PTY echo.
-    // Skip when a TUI/altscreen app is active: it owns Ctrl-C and the process is still running.
     interruptCallbackMap.set(tabId, () => {
-      if (!done && !sigintCleanupTimer && !isAltScreen(tabId)) {
+      if (!done && !sigintCleanupTimer) {
         sigintCleanupTimer = setTimeout(() => { sigintCleanupTimer = null; if (!done) cleanup({ cancelled: true }); }, 600);
       }
     });
@@ -628,7 +629,7 @@ export async function run(
       // PTY output following an interrupt — if onContext doesn't beat it, cleanup runs.
       // Must be checked before the commandStarted gate (startup-prompt race can leave it false).
       const recentInterrupt = (lastInterruptAt.get(tabId) ?? 0) > Date.now() - 1000;
-      if (recentInterrupt && !done && !sigintCleanupTimer && !isAltScreen(tabId)) {
+      if (recentInterrupt && !done && !sigintCleanupTimer) {
         sigintCleanupTimer = setTimeout(() => { sigintCleanupTimer = null; if (!done) cleanup({ cancelled: true }); }, 600);
       }
       if (!commandStarted && !isInteractive && !isStreamingInteractive && !resume) return; // discard shell echo before OSC 133;C

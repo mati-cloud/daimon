@@ -708,6 +708,7 @@ function Daimon() {
   };
 
   const closeTab = (id: string) => {
+    shell.close(id).catch(() => {});
     setSessions((prev) => {
       if (prev.length <= 1) return prev;
       const idx = prev.findIndex((s) => s.id === id);
@@ -1240,9 +1241,14 @@ function Daimon() {
     }
 
     // Several lines: one block each, run in order. A line ending in `\` continues onto the next.
-    // ponytail: splits multi-line constructs (for/if/heredoc) too; detect those if anyone pastes them.
+    // If the command contains shell compound constructs (for/while/if/case/heredoc), send whole.
     const lines = cmd.split(/(?<!\\)\n/).filter((l) => l.trim());
     if (lines.length > 1) {
+      const isCompound = /^\s*(for|while|until|if|case|select)\b|<<[-']?\w|\bdo\b|\bdone\b|\bfi\b|\besac\b/.test(cmd);
+      if (isCompound) {
+        await runBlock(sessionId, cmd, sess.state, undefined, secret);
+        return;
+      }
       for (const line of lines) await submit(line, sessionId, secret);
       return;
     }
