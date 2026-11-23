@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.14.0](https://github.com/mati-cloud/daimon/compare/v0.13.0...v0.14.0) (2026-11-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* **rpc:** request() now returns payload only (null on transport failure); callers needing the ok flag use requestEnvelope()
+
+### Features
+
+* **ui,daemon,app:** switch to UNIX socket auth and HTTP asset server ([cd6c17a](https://github.com/mati-cloud/daimon/commit/cd6c17ae6d697304a3d6f644b80eb717616d79eb))
+
+
+### Bug Fixes
+
+* **rpc:** distinguish daemon unreachable from null response ([05835fc](https://github.com/mati-cloud/daimon/commit/05835fc26d8794490b211d12bc965e592febb029))
+
 ## [0.13.0](https://github.com/mati-cloud/daimon/compare/v0.12.0...v0.13.0) (2026-11-23)
 
 
