@@ -1,5 +1,58 @@
 # Changelog
 
+## [0.12.0](https://github.com/mati-cloud/daimon/compare/v0.11.0...v0.12.0) (2026-11-23)
+
+
+### Features
+
+* bulk actions for multi-block selection in block mode ([a7c1cc6](https://github.com/mati-cloud/daimon/commit/a7c1cc6ef131cae1333bc8f75032bcbf699a746a))
+* **complete:** support dynamic subcommands from completer commands ([c7dd376](https://github.com/mati-cloud/daimon/commit/c7dd376822c94500b683211b7b6bb43738fb23f8))
+* editable keymaps with live conflict detection and blocking banner ([c04aba5](https://github.com/mati-cloud/daimon/commit/c04aba58707573c5965cbd2c2488c3551af14c98))
+* implement userland-controlled specs for autocompletion-engine ([149ae46](https://github.com/mati-cloud/daimon/commit/149ae46753e4df0b2106b39ed4a83bd0eee1e720))
+* keymap capture overlay covers full modal including sidebar ([28e8fcd](https://github.com/mati-cloud/daimon/commit/28e8fcde1040a3430bbf7d722b99177a81305d21))
+* keymap capture overlay with key visualization, suppress globals when any modal open ([82381c7](https://github.com/mati-cloud/daimon/commit/82381c777bc97dd13ed2b48b263e577d65e5cb89))
+* keymap registry with conflict detection and Keymaps settings tab ([df97a7c](https://github.com/mati-cloud/daimon/commit/df97a7c8a0f46fb202bf1eae38c4f87b6264f5f3))
+* per-block find bar, block pinning, multi-block selection in super-shift mode ([451b058](https://github.com/mati-cloud/daimon/commit/451b05867c3ac44787c7c242a3e52d2178105905))
+* **plugins:** expose onCommandStart with command text ([41d4fd3](https://github.com/mati-cloud/daimon/commit/41d4fd34fc16a4539fc6cf52dd091689429a4a4b))
+* redesign keymap capture overlay with premium full-panel UI ([4454af4](https://github.com/mati-cloud/daimon/commit/4454af4f825ab20cdcab363d38ba13802c051596))
+* **shell:** spawn new tabs in the active tab's directory ([2405e70](https://github.com/mati-cloud/daimon/commit/2405e70b9887b1a24c5cc9d8c5e467ae1da7c781))
+* show live zoom level badge while magnifying ([9f20d9a](https://github.com/mati-cloud/daimon/commit/9f20d9ae8529fc9f1e0335be978796e91457b001))
+* suppress OS shortcuts during keymap capture via CGEventTap ([6b96010](https://github.com/mati-cloud/daimon/commit/6b960102409d22cb3ffdcebe63720226bab72ae3))
+* **ui:** add block screenshot to clipboard with ⌘⇧S ([167d664](https://github.com/mati-cloud/daimon/commit/167d664a1076dccdf99a0a586b264330a975adca))
+* **ui:** screenshot whole terminal with ⌘⇧S when no block selected ([f6cbda6](https://github.com/mati-cloud/daimon/commit/f6cbda6243a338c4adbc85f43faaf7aef86bf583))
+* **ui:** show git status line counts next to file name ([a0b9527](https://github.com/mati-cloud/daimon/commit/a0b95272a5ec9eff53836853f727f4dbcecb9caf))
+* warn on OS-intercepted combos in keymap capture overlay ([bba1123](https://github.com/mati-cloud/daimon/commit/bba1123da9d4252d4323ebd9445737d850c9bc51))
+
+
+### Bug Fixes
+
+* allow key events through keyLock when target has data-key-lock-allow ([2e1c85a](https://github.com/mati-cloud/daimon/commit/2e1c85a9dca6aefd0ab96f98ec6097252c2a75af))
+* block plugin keybindings during keymap capture via setKeyLock ([5cac067](https://github.com/mati-cloud/daimon/commit/5cac067aec55d0c1c0b99d7d5547a67b0a6a957e))
+* cancel sleep/commands immediately on single Ctrl+C ([45bf08c](https://github.com/mati-cloud/daimon/commit/45bf08cb1c4375bdaa6901f1c9e57cb8b0a23909))
+* cap composer textarea at 6 lines, scroll on overflow ([a6d6d42](https://github.com/mati-cloud/daimon/commit/a6d6d42e23d8daab7b298d67d31d346e6a654ecd))
+* **complete:** accumulate parent flags during subcommand tree walk and complete flag values ([dd2e780](https://github.com/mati-cloud/daimon/commit/dd2e780cf1d99135db266dc894611e9721b5aefd))
+* defer AX permission request until window is visible ([f3fe9e6](https://github.com/mati-cloud/daimon/commit/f3fe9e671b0bb42701043ac65bf1e7b3c2dcb77f))
+* key capture uses document capture phase + tabIndex focus so keys always register ([4a9fd70](https://github.com/mati-cloud/daimon/commit/4a9fd70a7edc0cb4a28d3ac1d7a3fd96c088e406))
+* modal non-dismissable during keymap capture, only Cancel exits ([c577d8d](https://github.com/mati-cloud/daimon/commit/c577d8dd74f2cdb439ad0b4f5066620dc95e4e3a))
+* **notifications:** ask for permission on the first user gesture ([86a6d83](https://github.com/mati-cloud/daimon/commit/86a6d830507ef3c38671bfe795d6143dfa60d922))
+* pass HOME to plugin exec so tools like kubectl find ~/.kube/config ([b842fb4](https://github.com/mati-cloud/daimon/commit/b842fb45782b06c1210de45b9fcc9c798bd4c8e3))
+* resolve keymap bindings, extend plugin API ([8926144](https://github.com/mati-cloud/daimon/commit/892614473902c889f7ca603ef50c4732af76e22b))
+* **shell:** cancel block 600ms after Ctrl+C output when precmd is suppressed by zsh ([32ab050](https://github.com/mati-cloud/daimon/commit/32ab050342e621333fac9941b44f97b83818921b))
+* **shell:** drop at most one startup prompt in onContext, allow post-command resolve without commandStarted ([f5fbf4e](https://github.com/mati-cloud/daimon/commit/f5fbf4ec4a7a21e447d37ff9b2fde2a6445f5b7d))
+* **shell:** move sigint cleanup timer above commandStarted gate ([fcd4368](https://github.com/mati-cloud/daimon/commit/fcd4368f528df13600a2be4757e0fa95f6b1644f))
+* **shell:** pass cancelled:true from sigint timer, drop startup prompts via recentInterrupt guard ([45fa53c](https://github.com/mati-cloud/daimon/commit/45fa53ca862a39096ec2476bd412daa6ce1124c9))
+* **shell:** resolve block immediately on SIGINT exit (zsh suppresses precmd after Ctrl+C) ([e32973f](https://github.com/mati-cloud/daimon/commit/e32973f36f876839e0f896edf963b3e8806c5f38))
+* **tui:** only trust alt-screen/mouse sequences for zero-output TUI detection ([64355c1](https://github.com/mati-cloud/daimon/commit/64355c1aae173362f6cff7a257bc7be90b7e985c))
+* **tui:** prevent false TUI detection on Ctrl+C prompt redraw ([a440fe0](https://github.com/mati-cloud/daimon/commit/a440fe020a853f06cf5a45254cfacf19e86ebf42))
+* **tui:** restore keyboard focus after xterm drag-select, suppress shell echo, always patch deps on dev start ([85ba107](https://github.com/mati-cloud/daimon/commit/85ba107d1b3bc759da4ca5ea32276fa62947ef38))
+* **tui:** suppress TUI detection 1s after Ctrl+C, drop bracketed-paste from TUI signals ([db880cf](https://github.com/mati-cloud/daimon/commit/db880cf2ab5f7f1d0e95ae3103e6262f8fea1e32))
+* **ui:** fix screenshot truncation and remove block copy icon ([86ec9d3](https://github.com/mati-cloud/daimon/commit/86ec9d3fb3447030818032d368428518f895b1f2))
+* **ui:** remove broken css var fallback for terminal font size ([9d4bb6d](https://github.com/mati-cloud/daimon/commit/9d4bb6d1b752efd0b0bc4ae96ada4833fa3f7a2f))
+* **ui:** run multi-line input as one block per line ([a1a5c49](https://github.com/mati-cloud/daimon/commit/a1a5c497ad3e41ec2eeceed6b84282e806b48432))
+* **ui:** smooth header block transitions and preserve state during scroll ([2def642](https://github.com/mati-cloud/daimon/commit/2def642a038a6efe475deb7f3f1ac271199fb2c5))
+* use CFStringCreateWithCString for run loop mode instead of broken global symbol read ([bec51f7](https://github.com/mati-cloud/daimon/commit/bec51f7055211eb7331baf5e17e0d707034fe0a4))
+* use pure-C dylib callback to avoid JSCallback deadlock on main CFRunLoop ([d72d24f](https://github.com/mati-cloud/daimon/commit/d72d24fd1030ea6f911b8002d80854b19a680ecb))
+
 ## [0.11.0](https://github.com/mati-cloud/daimon/compare/v0.10.0...v0.11.0) (2026-11-20)
 
 
