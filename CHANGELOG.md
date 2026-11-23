@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/mati-cloud/daimon/compare/v0.14.1...v0.14.2) (2026-11-23)
+
+
+### Bug Fixes
+
+* **ui,daemon,shell:** handle alt-screen apps and kitty keyboard protocol ([62504da](https://github.com/mati-cloud/daimon/commit/62504daaee9ebe26caaa799dc30f4d370077d249))
+
 ## [0.14.1](https://github.com/mati-cloud/daimon/compare/v0.14.0...v0.14.1) (2026-11-23)
 
 
