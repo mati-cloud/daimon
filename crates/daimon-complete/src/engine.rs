@@ -61,9 +61,9 @@ pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<S
 /// Spec-dependent completion: walk the subcommand tree and suggest subcommands/flags/args for
 /// the token at `idx`. Split out from `complete_with` so a spec can be supplied directly in tests.
 fn complete_against(spec: &crate::spec::Spec, words: &[String], idx: usize, partial: &str, cwd: &str, remote: Option<&Listing>) -> Vec<Suggestion> {
-    // Walk subcommand tree
+    // Walk subcommand tree, accumulating flags from every level (parent flags stay in scope).
     let mut subcommands = &spec.subcommands;
-    let mut flags = &spec.flags;
+    let mut all_flags: Vec<&crate::spec::Flag> = spec.flags.iter().collect();
     let mut args = &spec.args;
     let mut sub_source = &spec.subcommand_source;
     let mut no_fallback = spec.no_file_fallback;
@@ -73,7 +73,7 @@ fn complete_against(spec: &crate::spec::Spec, words: &[String], idx: usize, part
         let word = &words[sub_depth];
         if let Some(sub) = subcommands.iter().find(|s| &s.name == word || s.aliases.contains(word)) {
             subcommands = &sub.subcommands;
-            flags = &sub.flags;
+            all_flags.extend(sub.flags.iter());
             args = &sub.args;
             sub_source = &sub.subcommand_source;
             no_fallback = sub.no_file_fallback;
@@ -83,11 +83,12 @@ fn complete_against(spec: &crate::spec::Spec, words: &[String], idx: usize, part
         }
     }
 
-    let mut out = Vec::new();
+    let flags = all_flags;
+    let mut out: Vec<Suggestion> = Vec::new();
 
     // If partial starts with '-', complete flags
     if partial.starts_with('-') {
-        for f in flags {
+        for f in &flags {
             if f.name.starts_with(partial) {
                 out.push(Suggestion { text: f.name.clone(), description: f.description.clone(), kind: SuggestionKind::Flag });
             }
@@ -128,6 +129,16 @@ fn complete_against(spec: &crate::spec::Spec, words: &[String], idx: usize, part
         }
     }
 
+    // If the previous token is a flag that takes a value, complete that value.
+    if idx > 0 {
+        let prev = &words[idx - 1];
+        if let Some(flag) = flags.iter().find(|f| &f.name == prev || f.short.as_ref() == Some(prev)) {
+            if let Some(arg_kind) = &flag.arg {
+                return complete_arg(arg_kind, partial, cwd, remote);
+            }
+        }
+    }
+
     // Arg completions based on arg kind
     let arg_pos = idx.saturating_sub(sub_depth);
     let arg = args.get(arg_pos)
@@ -140,7 +151,7 @@ fn complete_against(spec: &crate::spec::Spec, words: &[String], idx: usize, part
     // No declared arg covers this position. A tool that takes no file args suppresses the
     // filesystem fallback so the prompt doesn't list the cwd.
     if no_fallback {
-        return out;
+        return vec![];
     }
     // Last resort: filesystem
     filesystem_completions(partial, cwd, false, remote)

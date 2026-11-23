@@ -164,3 +164,19 @@ fn git_alias_from_real_config_surfaces() {
         assert!(out.iter().any(|s| s.text == "ai-commit"), "got: {:?}", out.iter().map(|s|&s.text).collect::<Vec<_>>());
     }
 }
+
+#[test]
+fn flag_value_completion() {
+    // mutavault kv delete-secret --mount <TAB> → 32 engine choices
+    let r = complete("mutavault kv delete-secret --mount ", "/tmp");
+    let t = texts(&r);
+    assert!(t.contains(&"secrets"), "missing 'secrets': {t:?}");
+    assert!(t.contains(&"containers-secrets"), "missing 'containers-secrets': {t:?}");
+    assert!(r.iter().all(|s| matches!(s.kind, SuggestionKind::Choice)), "wrong kind: {r:?}");
+
+    // partial filter works
+    let r2 = complete("mutavault kv delete-secret --mount net", "/tmp");
+    let t2 = texts(&r2);
+    assert!(t2.iter().all(|s| s.starts_with("net")), "unexpected: {t2:?}");
+    assert!(t2.contains(&"network-secrets"), "missing network-secrets: {t2:?}");
+}
