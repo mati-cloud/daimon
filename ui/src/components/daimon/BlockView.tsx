@@ -703,10 +703,8 @@ function FullscreenPager({
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key === "c") {
-        e.preventDefault();
-        if (inSearch) { searchRef.current?.blur(); return; }
-        setFullscreen(false);
-        return;
+        if (inSearch) { e.preventDefault(); searchRef.current?.blur(); return; }
+        // Ctrl/Cmd+C not consumed here — Q is enough to exit
       }
       if (inSearch) { onKey(e, true); return; } // let every character (q, /, f…) be typed
       // Free scrolling, independent of the row cursor: Shift+↑/↓ in line steps, PageUp/PageDown by page.
@@ -836,11 +834,15 @@ function LogRefs({ refs, isHead, search }: { refs?: GitLogRef[] | undefined; isH
   );
 }
 
+const gitLogExpandedCache = new Map<string, Set<string>>();
+
 function GitLogView({ entries: rawEntries, cwd, kind: _kind, isLast }: Extract<Out, { kind: "gitlog" }> & { isLast?: boolean }) {
   const entries = Array.isArray(rawEntries) ? rawEntries : [];
+  const cacheKey = `${cwd}:${entries[0]?.fullHash ?? ""}`;
   const [commitIdx, setCommitIdx] = useState(0);
   const [fileIdx, setFileIdx] = useState<number | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expanded, setExpandedRaw] = useState<Set<string>>(() => gitLogExpandedCache.get(cacheKey) ?? new Set());
+  const setExpanded = (fn: Set<string> | ((prev: Set<string>) => Set<string>)) => setExpandedRaw((prev) => { const next = typeof fn === "function" ? fn(prev) : fn; gitLogExpandedCache.set(cacheKey, next); return next; });
   const [openFiles, setOpenFiles] = useState<Record<string, Set<string>>>({});
   const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
   const commitRowRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -976,15 +978,13 @@ function GitLogView({ entries: rawEntries, cwd, kind: _kind, isLast }: Extract<O
                   </button>
                   {open && (
                     <div className="bg-secondary/20 pb-3 pl-8 pr-4">
-                      <dl className="grid grid-cols-[6rem_1fr] gap-x-4 gap-y-1 font-mono text-[13px]">
-                        <dt className="text-muted-foreground">full hash</dt>
+                      <dl className="grid grid-cols-[6rem_1fr] gap-x-4 gap-y-1 font-mono text-[13px] pt-2">
+                        <dt className="text-muted-foreground">Full hash</dt>
                         <dd className="flex items-center gap-2">
-                          <span className="text-foreground break-all">{e.fullHash}</span>
-                          <button onClick={(ev) => { ev.stopPropagation(); navigator.clipboard.writeText(e.fullHash); toast.success(`Copied: ${e.fullHash.slice(0, 12)}…`); }}
-                            className="shrink-0 rounded px-1.5 py-0.5 text-[13px] border border-line/50 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">copy</button>
+                          <span className="text-foreground break-all cursor-pointer select-text" onDoubleClick={(ev) => { ev.stopPropagation(); navigator.clipboard.writeText(e.fullHash); toast.success(`Copied: ${e.fullHash.slice(0, 12)}…`); }}>{e.fullHash}</span>
                         </dd>
-                        <dt className="text-muted-foreground">date</dt><dd className="text-foreground">{formatDate(e.date)}</dd>
-                        <dt className="text-muted-foreground">author</dt><dd className="text-foreground">{e.author}</dd>
+                        <dt className="text-muted-foreground">Date</dt><dd className="text-foreground cursor-pointer" onDoubleClick={(ev) => { ev.stopPropagation(); navigator.clipboard.writeText(formatDate(e.date)); toast.success("Date copied"); }}>{formatDate(e.date)}</dd>
+                        <dt className="text-muted-foreground">Author</dt><dd className="text-foreground cursor-pointer" onDoubleClick={(ev) => { ev.stopPropagation(); navigator.clipboard.writeText(e.author); toast.success("Author copied"); }}>{e.author}{e.authorEmail ? <span className="ml-2 text-muted-foreground/60">&lt;{e.authorEmail}&gt;</span> : null}</dd>
                       </dl>
                       <div className="mt-2 border-t border-line/30 pt-2">
                         <p className="mb-1 font-mono text-[13px] text-muted-foreground/50 tracking-wide">changed files</p>

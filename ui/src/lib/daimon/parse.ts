@@ -39,7 +39,7 @@ export type Out =
   | { kind: "lslong"; entries: LsEntry[]; total: string }
   | { kind: "table"; head: string[]; rows: string[][]; accentCol?: number }
   | { kind: "pairs"; pairs: [string, string][] }
-  | { kind: "gitlog"; entries: { hash: string; fullHash: string; date: string; subject: string; author: string; isHead?: boolean; unpushed?: boolean; unpushedTo?: string; refs?: GitLogRef[] }[]; cwd: string }
+  | { kind: "gitlog"; entries: { hash: string; fullHash: string; date: string; subject: string; author: string; authorEmail?: string; isHead?: boolean; unpushed?: boolean; unpushedTo?: string; refs?: GitLogRef[] }[]; cwd: string }
   | { kind: "gitbranches"; branches: string[]; current: string; trunk?: string | null; nodes?: GitBranchNode[] }
   | { kind: "gitstatus"; branch: string; upstream?: string | null; ahead: number; behind: number; staged: GitStatusFile[]; unstaged: GitStatusFile[]; untracked: string[]; added?: number; removed?: number }
   | { kind: "gitdiff"; raw: string }

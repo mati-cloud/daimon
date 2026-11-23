@@ -69,6 +69,8 @@ declare module "daimon" {
   /** Persistent key/value strings (shared with daimon's own prefs: prefix your keys). */
   export function prefGet(key: string): Promise<string | null>;
   export function prefSet(key: string, value: string): Promise<boolean>;
+  /** Register a settings panel under Settings → Plugins. `render` is a React component (no props). */
+  export function registerSettingsPanel(id: string, label: string, render: ComponentType): void;
   /** Open an http(s) URL in the system browser. */
   export function openUrl(url: string): void;
   /** daimon's keyboard-hint chips: <Keys combo="⌘⇧T" size="xs" />. */

@@ -74,12 +74,14 @@ export type RegisteredStatusItem = { id: string; use: UseStatusItem; serial: num
 
 type Shortcut = { id: string; combo: string; handler: (e: KeyboardEvent) => void };
 type WatchedEnv = { id: string };
+export type SettingsPanel = { id: string; label: string; render: ComponentType };
 
 const headerButtons = createRegistry<HeaderButton>();
 const statusItems = createRegistry<RegisteredStatusItem>();
 const shortcuts = createRegistry<Shortcut>();
 const watchedEnv = createRegistry<WatchedEnv>();
-const registries = [headerButtons, statusItems, shortcuts, watchedEnv];
+const settingsPanels = createRegistry<SettingsPanel>();
+const registries = [headerButtons, statusItems, shortcuts, watchedEnv, settingsPanels];
 let statusSerial = 0;
 
 /** Put a button/badge into the header's right-side slot. Registering an id again replaces it.
@@ -99,6 +101,13 @@ export function registerStatusItem(id: string, use: UseStatusItem) {
 }
 
 export const useStatusItems = (): readonly RegisteredStatusItem[] => statusItems.use();
+
+/** Register a settings panel shown in Settings → Plugins. `render` is a React component with no props. */
+export function registerSettingsPanel(id: string, label: string, render: ComponentType) {
+  settingsPanels.add({ id, label, render });
+}
+
+export const useSettingsPanels = (): readonly SettingsPanel[] => settingsPanels.use();
 
 // ── Keyboard shortcuts ───────────────────────────────────────────────────────────────────
 
@@ -242,6 +251,7 @@ export const pluginApi = {
   registerHeaderButton,
   registerStatusItem,
   registerShortcut,
+  registerSettingsPanel,
   useShellContext,
   onShellContext,
   onCommandStart,

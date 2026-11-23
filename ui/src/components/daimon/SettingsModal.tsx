@@ -8,10 +8,12 @@ import {
   InfoIcon,
   SearchIcon,
   MapIcon,
+  PuzzleIcon,
 } from "lucide-react";
 import { Keys } from "./Kbd";
 import { GLASS_DEFAULT, GLASS_MIN_OPACITY, loadGlass, nativeBlurLabel, nativeBlurMode, saveGlass, type Glass } from "@/lib/daimon/appearance";
 import { getShortcuts, setOverride, subscribeKeymaps, hasAnyConflict, type ResolvedShortcut } from "@/lib/daimon/keymaps";
+import { useSettingsPanels } from "@/lib/daimon/plugins";
 
 /** The Linux app's window is opaque (see app/src/bun/index.ts): Electrobun delivers no
  *  keyboard input to a see-through CEF window there. DAIMON_TRANSPARENT=1 opts in. */
@@ -46,6 +48,7 @@ const CATEGORIES = [
   { id: "notif",      label: "Notifications", Icon: BellIcon },
   { id: "shortcuts",  label: "Shortcuts",  Icon: KeyboardIcon },
   { id: "keymaps",    label: "Keymaps",    Icon: MapIcon },
+  { id: "plugins",    label: "Plugins",    Icon: PuzzleIcon },
   { id: "about",      label: "About",      Icon: InfoIcon },
 ] as const;
 
@@ -298,6 +301,7 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
   const [search, setSearch] = useState("");
   const [keymapCapturing, setKeymapCapturing] = useState<{ id: string; desc: string; current: string } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const pluginPanels = useSettingsPanels();
 
   // Pref state (loaded once on open)
   const [fontFamily, setFontFamily] = useState("JetBrains Mono");
@@ -591,7 +595,7 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
             <span className="font-sans text-[13px] font-semibold text-foreground">Settings</span>
           </div>
           <nav className="flex-1 py-2">
-            {CATEGORIES.map(({ id, label, Icon }) => (
+            {CATEGORIES.filter(({ id }) => id !== "plugins" || pluginPanels.length > 0).map(({ id, label, Icon }) => (
               <button
                 key={id}
                 onClick={() => { setCategory(id); setSearch(""); }}
@@ -645,6 +649,22 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
               </div>
             ) : category === "keymaps" && !showingSearch ? (
               <KeymapsPanel onStartCapture={setKeymapCapturing} />
+            ) : category === "plugins" && !showingSearch ? (
+              <div>
+                {pluginPanels.length === 0 ? (
+                  <p className="px-4 py-4 font-mono text-[12px] text-muted-foreground/50">No plugins have registered settings.</p>
+                ) : (
+                  pluginPanels.map((panel) => {
+                    const Panel = panel.render;
+                    return (
+                      <div key={panel.id} className="border-b border-border/30">
+                        <div className="px-4 pt-4 pb-1 font-mono text-[11px] text-muted-foreground/60 uppercase tracking-widest">{panel.label}</div>
+                        <Panel />
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             ) : category === "about" && !showingSearch ? (
               <div className="px-4 py-6">
                 <p className="font-sans text-sm text-foreground/80">daimon v0.1.0 — a terminal for developers</p>

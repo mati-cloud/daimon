@@ -50,7 +50,7 @@ fn rename_target(path: &str) -> String {
 }
 
 pub fn git_status(cwd: &str) -> Value {
-    match run("git", &["--no-pager", "status", "--porcelain=v1", "-b"], Some(cwd)) {
+    match run("git", &["--no-pager", "--no-optional-locks", "status", "--porcelain=v1", "-b"], Some(cwd)) {
         Err(e) => json!({ "error": e }),
         Ok(raw) => {
             let mut branch = String::new();
@@ -197,9 +197,9 @@ pub fn git_file_content(blob: &str, file_path: &str, cwd: &str) -> Value {
 pub fn git_log(cwd: &str, limit: usize, args: &[String]) -> Value {
     let limit_str = limit.to_string();
     // %x1f (unit separator) never appears in commit text, unlike `|`.
-    let fmt = format!("--format={}", "%H%x1f%h%x1f%aI%x1f%s%x1f%an%x1f%D");
+    let fmt = format!("--format={}", "%H%x1f%h%x1f%aI%x1f%s%x1f%an%x1f%D%x1f%ae");
     let limit_flag = format!("-{}", limit_str);
-    let mut git_args: Vec<&str> = vec!["--no-pager", "log", &limit_flag, &fmt];
+    let mut git_args: Vec<&str> = vec!["--no-pager", "--no-optional-locks", "log", &limit_flag, &fmt];
     git_args.extend(args.iter().map(String::as_str));
     let raw = match run("git", &git_args, Some(cwd)) {
         Err(e) => return json!({ "error": e }),
@@ -230,7 +230,7 @@ pub fn git_log(cwd: &str, limit: usize, args: &[String]) -> Value {
     let unpushed_to = upstream.unwrap_or_else(|| "any remote".to_string());
 
     let entries: Vec<Value> = raw.lines().map(|line| {
-        let parts: Vec<&str> = line.splitn(6, '\x1f').collect();
+        let parts: Vec<&str> = line.splitn(7, '\x1f').collect();
         let full = parts.first().copied().unwrap_or("");
         let (is_head, refs) = parse_decorations(parts.get(5).copied().unwrap_or(""), &remotes, &locals, trunk.as_deref());
         json!({
@@ -239,6 +239,7 @@ pub fn git_log(cwd: &str, limit: usize, args: &[String]) -> Value {
             "date": parts.get(2).unwrap_or(&""),
             "subject": parts.get(3).unwrap_or(&""),
             "author": parts.get(4).unwrap_or(&""),
+            "authorEmail": parts.get(6).unwrap_or(&""),
             "isHead": is_head,
             "unpushed": unpushed.contains(full),
             "unpushedTo": unpushed_to,
@@ -318,7 +319,7 @@ struct BranchInfo {
 /// main/master) is the root.
 pub fn git_branch(cwd: &str) -> Value {
     let fmt = "--format=%(refname:short)%1f%(HEAD)%1f%(objectname:short)%1f%(upstream:short)%1f%(upstream:track,nobracket)%1f%(committerdate:relative)%1f%(contents:subject)";
-    let raw = match run("git", &["--no-pager", "branch", fmt], Some(cwd)) {
+    let raw = match run("git", &["--no-pager", "--no-optional-locks", "branch", fmt], Some(cwd)) {
         Err(e) => return json!({ "error": e }),
         Ok(raw) => raw,
     };
