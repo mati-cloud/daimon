@@ -20,6 +20,7 @@ import { LandingPage } from "@/components/daimon/LandingPage";
 import { CommandPalette } from "@/components/daimon/CommandPalette";
 import { GlobalSearch } from "@/components/daimon/GlobalSearch";
 import { HeaderButtonSlot, StatusItemSlot } from "@/components/daimon/HeaderExtension";
+import { setKeysHidden } from "@/components/daimon/Kbd";
 import { setPluginActiveTab, setPluginCommandRunner } from "@/lib/daimon/plugins";
 import { KeyboardShortcutsModal } from "@/components/daimon/KeyboardShortcutsModal";
 import { SettingsModal } from "@/components/daimon/SettingsModal";
@@ -247,6 +248,7 @@ function Daimon() {
   const [gitRemoved, setGitRemoved] = useState(0);
   const [showBadges, setShowBadges] = useState(true);
   const [showPowerline, setShowPowerline] = useState(false);
+  const [hideKeys, setHideKeys] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchShown = usePresence(searchOpen);   // stays mounted while it animates out
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -349,6 +351,7 @@ function Daimon() {
 
   useEffect(() => { applyTheme(theme); }, [theme]);
   useEffect(() => { localStorage.setItem("daimon-font-size", String(fontSize)); }, [fontSize]);
+  useEffect(() => { setKeysHidden(hideKeys); }, [hideKeys]);
 
   // Load persisted data from DB on mount
   useEffect(() => {
@@ -360,7 +363,8 @@ function Daimon() {
       shell.prefGet("notif-threshold"),
       shell.prefGet("show-badges"),
       shell.prefGet("show-powerline"),
-    ]).then(async ([histEntries, savedTheme, savedSessionsJson, notifEnabledPref, notifThresholdPref, badgesPref, powerlinePref]) => {
+      shell.prefGet("hide-keys"),
+    ]).then(async ([histEntries, savedTheme, savedSessionsJson, notifEnabledPref, notifThresholdPref, badgesPref, powerlinePref, hideKeysPref]) => {
       // History: sorted oldest-first for array index stability
       const sorted = [...histEntries].sort((a, b) => a.ts - b.ts);
       const history = sorted.map(e => e.cmd);
@@ -426,6 +430,7 @@ function Daimon() {
       // Context display prefs (badges default on, powerline default off)
       setShowBadges(badgesPref !== "0");
       setShowPowerline(powerlinePref === "1");
+      setHideKeys(hideKeysPref === "1");
       // One-time cleanup of old localStorage keys
       try {
         localStorage.removeItem("daimon-history-v1");
@@ -902,6 +907,7 @@ function Daimon() {
       if (chord(e, false, "f")) { e.preventDefault(); setGlobalSearchOpen(true); return; }
       if (chord(e, false, "=") || chord(e, false, "+")) { e.preventDefault(); setFontSize(s => Math.min(s + 1, 20)); return; }
       if (chord(e, false, "-")) { e.preventDefault(); setFontSize(s => Math.max(s - 1, 10)); return; }
+      if (chord(e, false, "0")) { e.preventDefault(); setFontSize(13); return; }
       if (chord(e, false, "k")) { e.preventDefault(); setKeysModalOpen(true); return; }
       if (chord(e, false, ",")) { e.preventDefault(); setSettingsOpen(true); return; }
       if (chord(e, false, "b")) { e.preventDefault(); setSidebarOpen((o) => !o); return; }
@@ -1801,7 +1807,8 @@ function Daimon() {
 
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="no-drag flex items-center gap-2 font-mono text-[13px] text-foreground">
-              {sessionLabel(active)}
+              {active.state.cwd[active.state.cwd.length - 1] ?? "~"}
+              {gitBranch && <span className="text-muted-foreground/60">{gitBranch}</span>}
               <span className="text-muted-foreground/40">/</span>
             </span>
             {/* The command of the block scrolled out above the viewport, sticky like a section
@@ -1826,9 +1833,6 @@ function Daimon() {
           {showBadges && !showPowerline && <StatusItemSlot variant="badge" />}
 
           <div className="no-drag ml-auto flex items-center gap-3">
-            <span className="hidden font-mono text-[11px] tabular-nums text-muted-foreground sm:inline">
-              {active.blocks.length} {active.blocks.length === 1 ? "run" : "runs"}
-            </span>
             {splitSessionId && (
               <button
                 onClick={() => { setSessions((prev) => prev.map((s) => s.id === activeId ? removeSplit(s) : s)); setFocusedPane("left"); }}
@@ -1911,7 +1915,7 @@ function Daimon() {
         ]}
       />
       <KeyboardShortcutsModal open={keysModalOpen} onClose={() => setKeysModalOpen(false)} />
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} theme={theme} onTheme={setTheme} fontSize={fontSize} onFontSize={setFontSize} showBadges={showBadges} onShowBadges={setShowBadges} showPowerline={showPowerline} onShowPowerline={setShowPowerline} />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} theme={theme} onTheme={setTheme} fontSize={fontSize} onFontSize={setFontSize} showBadges={showBadges} onShowBadges={setShowBadges} showPowerline={showPowerline} onShowPowerline={setShowPowerline} hideKeys={hideKeys} onHideKeys={setHideKeys} />
       </div>
     </div>
     </CaptureModeContext.Provider>

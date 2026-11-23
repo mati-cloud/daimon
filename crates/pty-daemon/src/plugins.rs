@@ -259,7 +259,7 @@ pub fn scan(source: &str) -> Vec<Finding> {
             r(r"\brunCommand\b", "runCommand", "type commands into your terminal", true),
             r(r"\b(fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon)\b", "network", "make network connections", true),
             r(r"\beval\s*\(|\bFunction\s*\(|\bimport\s*\(|setTimeout\s*\(\s*[\x22'`]", "dynamic-code", "run code built at runtime", true),
-            r(r"sessionStorage|localStorage|indexedDB|document\.cookie|__daimonPlugin|__electrobun|daimon_token", "internals", "read daimon's internal storage (incl. the daemon token)", true),
+            r(r"sessionStorage|localStorage|indexedDB|document\.cookie|__daimonPlugin|__electrobun", "internals", "read daimon's internal storage or IPC bridge", true),
             r(r"innerHTML|outerHTML|insertAdjacentHTML|document\.write|createElement\s*\(\s*[\x22'`](script|iframe)", "dom-injection", "inject HTML or scripts into daimon's window", true),
             r(r"\batob\s*\(|fromCharCode|(\\x[0-9a-fA-F]{2}){8}|(\\u[0-9a-fA-F]{4}){8}", "obfuscation", "contain encoded or obfuscated code", true),
             r(r"\bwatchEnv\b", "env", "read environment variables from your shell", false),

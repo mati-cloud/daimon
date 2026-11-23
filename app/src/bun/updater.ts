@@ -13,6 +13,7 @@
 
 import { Updater } from "electrobun/bun";
 import { appLog, appLogPath, appWarn } from "./appLog";
+import { restartDaemon, type Daemon } from "./daemon";
 
 /** What the sidebar shows: nothing, a download in progress, a restart button, or a failure. */
 export type UpdateState =
@@ -69,7 +70,7 @@ function errorState(version: string, message: string): UpdateState {
   };
 }
 
-export function startUpdater(isDev: boolean, notify: (s: UpdateState) => void) {
+export function startUpdater(isDev: boolean, notify: (s: UpdateState) => void, getDaemon: () => Daemon | null = () => null, onDaemonRestart?: (d: Daemon) => void) {
   let current: UpdateState = { state: "none" };
   const set = (s: UpdateState) => { current = s; notify(s); };
 
@@ -162,6 +163,19 @@ export function startUpdater(isDev: boolean, notify: (s: UpdateState) => void) {
       if (current.state !== "ready") return;
       appLog("[update] restarting into", current.version);
       void Updater.applyUpdate();
+    },
+    /** Restart only the pty-daemon from the staged bundle, keeping the app window open.
+     *  Sessions must be idle (0 active). UI changes still require a full apply(). */
+    applyDaemonOnly: async (): Promise<boolean> => {
+      if (current.state !== "ready") return false;
+      const d = getDaemon();
+      if (!d) { appWarn("[update] applyDaemonOnly: no daemon connected"); return false; }
+      const hash = Updater.updateInfo().hash;
+      appLog("[update] restarting daemon from staged build", hash);
+      const nd = await restartDaemon(d, hash);
+      if (!nd) return false;
+      onDaemonRestart?.(nd);
+      return true;
     },
   };
 }

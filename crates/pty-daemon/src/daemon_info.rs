@@ -38,12 +38,17 @@ pub fn log_path(port: u16) -> PathBuf {
     state_dir().join(format!("daemon-{port}.log"))
 }
 
+pub fn socket_path() -> PathBuf {
+    state_dir().join(format!("daemon-{}.sock", port()))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Info {
     pub pid: u32,
     pub port: u16,
     pub token: String,
     pub build: String,
+    pub socket: String,
 }
 
 /// The shared secret, created on first use.
@@ -94,7 +99,13 @@ pub fn build_id() -> String {
 
 /// Publish the running daemon (call after the port is bound).
 pub fn publish(port: u16, token: &str) -> Result<()> {
-    let info = Info { pid: std::process::id(), port, token: token.to_string(), build: build_id() };
+    let info = Info {
+        pid: std::process::id(),
+        port,
+        token: token.to_string(),
+        build: build_id(),
+        socket: socket_path().to_string_lossy().into_owned(),
+    };
     write_private(&info_path(port), &serde_json::to_string(&info)?)
 }
 
@@ -116,6 +127,7 @@ pub fn print_info() -> Result<()> {
     let out = serde_json::json!({
         "port": port,
         "token": token()?,
+        "socket": socket_path().to_string_lossy(),
         "selfBuild": build_id(),
         "running": read(port),
     });

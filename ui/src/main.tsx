@@ -58,7 +58,7 @@ import { toast } from "sonner";
 applyGlass(loadGlass());
 
 // Pinch / Ctrl + wheel magnifies the window (also over full-screen programs), and a
-// ⌘/Ctrl-drag pans it.
+// ⌘/Ctrl-drag pans it. Keyboard +/-/0 is handled by index.tsx (font-size change).
 installMagnify(document.getElementById("root")!);
 
 // A link whose text is a URL for one host but which opens another (OSC 8 lets output pick

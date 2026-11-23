@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState, useContext, createContext, useMemo, useCallback } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState, useContext, createContext, useMemo, useCallback, useSyncExternalStore } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { createPortal } from "react-dom";
 import { LoaderCircleIcon, XCircleIcon, ChevronDownIcon, GitBranchIcon, ChevronRightIcon, PlusIcon, ChevronUpIcon, XIcon, CircleDotIcon, CloudIcon, CloudOffIcon, ArrowUpIcon, ArrowDownIcon, CheckIcon, TagIcon, PinIcon, SearchIcon } from "lucide-react";
@@ -8,7 +8,7 @@ import { MarkdownDiffView, MarkdownModeToggle } from "./MarkdownDiffView";
 import { isMarkdownPath, useMarkdownRendered, toggleMarkdownRendered } from "@/lib/daimon/markdownMode";
 import { fetchLinkPreview, previewUrls, useLinkPreviewsEnabled, useRemoteImage, type LinkPreview } from "@/lib/daimon/linkPreview";
 import { displayPath } from "@/lib/daimon/world";
-import { shell } from "@/lib/daimon/rpc";
+import { shell, getLatestProbe, subscribeProbe, type ActivityProbe, type ProbeProcess } from "@/lib/daimon/rpc";
 import { sendRaw, resizePty, getTuiReplayBuffer, getAltScreen, onAltScreenChange, takeRedraw, STREAMING_INTERACTIVE_RE, abandonRun, looksLikeYaml, splitHtmlLines } from "@/lib/daimon/shell";
 import type { Block, Out, LsEntry, GitStatusFile, GitBranchNode, GitLogRef } from "@/lib/daimon/shell";
 import { inTerminal, mountTui, writeClipboard, type TuiTerminal } from "@/lib/daimon/tuiTerminal";
@@ -2715,8 +2715,15 @@ function OutView({ out: rawOut, input = "", ctx = "", cwd, isLast = false, onSea
 /** Collapsed output clamp; output taller than this is "long" and becomes collapsible. */
 const COLLAPSED_MAX_PX = 320;
 
-/** Terminal background. The WebGPU surface is opaque, so this is a solid color. */
-const TUI_BG = "#0d1117";
+/** Terminal background resolved from CSS --background at call time (theme-aware). */
+function tuiBg(): string {
+  const el = document.createElement("div");
+  el.style.cssText = "position:fixed;visibility:hidden;background-color:var(--background)";
+  document.body.appendChild(el);
+  const color = getComputedStyle(el).backgroundColor;
+  document.body.removeChild(el);
+  return color || "#0d1117";
+}
 
 /** Plain text of the outputs that can carry URLs (raw lines and ANSI html, tags and entities dropped). */
 const PREVIEW_SCAN_CHARS = 256 << 10;
@@ -2797,6 +2804,12 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
   const ok = block.code === 0;
   const failed = !block.pending && !ok;
   const [expanded, setExpandedRaw] = useState(true);
+  const activityProbe = useSyncExternalStore(subscribeProbe, () => block.pending ? getLatestProbe(sessionId) : undefined, () => undefined);
+  const [probeOpen, setProbeOpen] = useState(false);
+  // Close drill-down when probe clears (command finished)
+  const prevProbeRef = useRef<typeof activityProbe>(undefined);
+  if (prevProbeRef.current && !activityProbe && probeOpen) setProbeOpen(false);
+  prevProbeRef.current = activityProbe;
   // Once the user toggles a block by hand, stop auto-collapsing it.
   const userToggledRef = useRef(false);
   const setExpanded = useCallback((v: boolean | ((x: boolean) => boolean)) => {
@@ -2913,7 +2926,7 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
       scrollback: 10000,
       theme: {
         foreground: "#e6edf3",
-        background: TUI_BG,
+        background: tuiBg(),
         cursor: "#58a6ff",
         palette: [
           "#484f58", "#ff7b72", "#3fb950", "#d29922", "#58a6ff", "#bc8cff", "#39c5cf", "#b1bac4",
@@ -2997,7 +3010,7 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
         <span className="font-mono text-[13px] text-muted-foreground">{displayPath(block.cwd)}</span>
         <button
           onClick={() => onRerun(block.input)}
-          className={`font-mono text-[14px] font-medium underline-offset-4 hover:underline ${failed ? "text-alarm" : "text-foreground"}`}
+          className={`min-w-0 break-all text-left font-mono text-[14px] font-medium underline-offset-4 hover:underline ${failed ? "text-alarm" : "text-foreground"}`}
           title="Run again"
         >
           {block.input}
@@ -3012,12 +3025,67 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
             <span>cancel</span>
           </button>
         )}
+        {activityProbe && (
+          <button
+            onClick={() => setProbeOpen(o => !o)}
+            className="ml-1 flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground/70 hover:bg-muted/40 hover:text-muted-foreground transition-colors"
+          >
+            {activityProbe.netConnections.length > 0 ? "⟳ network" : activityProbe.processes.some(p => (p.cpuPct ?? 0) > 0.5) ? `⟳ cpu ${activityProbe.processes.reduce((s, p) => s + (p.cpuPct ?? 0), 0).toFixed(0)}%` : `⚠ quiet ${Math.round(activityProbe.quietMs / 1000)}s`}
+          </button>
+        )}
         <span className="ml-auto flex items-center gap-3">
           {isPinned && <PinIcon className="size-3 text-signal/70" aria-label="pinned" />}
           <BlockModeHints open={modeActive} collapsible={isLong ? (expanded ? "collapse" : "expand") : null} />
           <BlockMeta block={block} />
         </span>
       </header>
+      {/* Activity probe drill-down */}
+      {activityProbe && probeOpen && (() => {
+        // Build tree: map ppid → children, roots = processes with no parent in list
+        const pids = new Set(activityProbe.processes.map(p => p.pid));
+        const roots = activityProbe.processes.filter(p => !pids.has(p.ppid));
+        const childrenOf = (ppid: number) => activityProbe.processes.filter(p => p.ppid === ppid);
+        const renderProc = (p: ProbeProcess, depth: number): React.ReactNode => (
+          <React.Fragment key={p.pid}>
+            <div className="flex items-baseline gap-2" style={{ paddingLeft: depth * 12 }}>
+              <span className="text-foreground/80">{p.name}</span>
+              <span className="text-muted-foreground/40 text-[10px]">{p.pid}</span>
+              {p.cpuPct != null && p.cpuPct >= 1 && <span className="text-amber-500/70 text-[10px]">cpu {p.cpuPct.toFixed(0)}%</span>}
+            </div>
+            {childrenOf(p.pid).map(c => renderProc(c, depth + 1))}
+          </React.Fragment>
+        );
+        return (
+          <div className="mx-1 mb-1 rounded-md border border-border/50 bg-muted/20 px-3 py-2 font-mono text-[11px] flex flex-col gap-2">
+            <div className="flex gap-3">
+              <span className="text-muted-foreground/40 w-16 shrink-0">quiet</span>
+              <span className="text-muted-foreground/80">{Math.round(activityProbe.quietMs / 1000)}s</span>
+            </div>
+            {activityProbe.processes.length > 0 && (
+              <div className="flex gap-3">
+                <span className="text-muted-foreground/40 w-16 shrink-0">processes</span>
+                <div className="flex flex-col gap-0.5">{roots.map(p => renderProc(p, 0))}</div>
+              </div>
+            )}
+            {activityProbe.netConnections.length > 0 && (
+              <div className="flex gap-3">
+                <span className="text-muted-foreground/40 w-16 shrink-0">network</span>
+                <div className="flex flex-col gap-0.5">
+                  {activityProbe.netConnections.map((c, i) => (
+                    <div key={i} className="flex items-baseline gap-2">
+                      <span className="text-foreground/80">{c.process}</span>
+                      <span className="text-muted-foreground/50">{c.local}</span>
+                      <span className="text-muted-foreground/30">→</span>
+                      <span className="text-muted-foreground/70">{c.remote}</span>
+                      {c.state && <span className="text-sky-500/50 text-[10px]">{c.state}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
       {/* Inline find bar */}
       {findOpen && (
         <div className="flex items-center gap-2 mt-1.5 mb-1 px-1 py-1 rounded-md bg-card border border-border">
@@ -3053,7 +3121,7 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
           className={tuiFullscreen
             ? "tui-fullscreen absolute inset-0 z-50"
             : "mt-2.5 h-[min(24rem,60vh)] overflow-hidden rounded"}
-          style={{ minHeight: 0, background: TUI_BG }}
+          style={{ minHeight: 0, background: tuiBg() }}
           onPointerUp={() => {
             // After a mouse drag-select in the xterm fallback, the browser's native selection
             // holds keyboard focus. Refocus the terminal input so keys reach the program again.

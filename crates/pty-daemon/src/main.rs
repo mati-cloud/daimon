@@ -1,3 +1,4 @@
+mod assets;
 mod commands;
 mod complete;
 mod daemon_info;
@@ -10,9 +11,11 @@ mod session;
 mod shell_env;
 mod specs;
 mod store;
+mod unix;
 mod ws;
 
 use anyhow::Result;
+use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -70,10 +73,21 @@ fn main() -> Result<()> {
             }
             Err(e) => return Err(e.into()),
         };
+
+        // UNIX domain socket for privileged commands (uid ownership = auth, no token).
+        let sock_path = daemon_info::socket_path();
+        let _ = std::fs::remove_file(&sock_path); // remove stale socket
+        std::fs::create_dir_all(sock_path.parent().unwrap())?;
+        let unix_listener = tokio::net::UnixListener::bind(&sock_path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600))?;
+        }
         let token = daemon_info::token()?;
         daemon_info::publish(port, &token)?;
-        let db = store::Store::open()?;
-        info!("daimon pty-daemon listening on ws://127.0.0.1:{port}");
+        let db = Arc::new(store::Store::open()?);
+        info!("daimon pty-daemon listening on 127.0.0.1:{port}, socket {}", sock_path.display());
 
         let shutdown_port = port;
         tokio::spawn(async move {
@@ -83,6 +97,16 @@ fn main() -> Result<()> {
             std::process::exit(0);
         });
 
-        ws::serve(listener, db, token, port).await
+        // Share SessionManager between TCP (output broadcast) and UNIX (command handling).
+        let (event_tx, event_rx) = tokio::sync::mpsc::channel::<session::SessionEvent>(1024);
+        let mgr = Arc::new(tokio::sync::Mutex::new(session::SessionManager::new(event_tx.clone())));
+        let db2 = db.clone();
+        let mgr2 = mgr.clone();
+        tokio::spawn(async move {
+            if let Err(e) = unix::serve(unix_listener, mgr2, db2, port).await {
+                tracing::error!("[unix] serve error: {e}");
+            }
+        });
+        ws::serve(listener, db, port, event_tx, event_rx).await
     })
 }

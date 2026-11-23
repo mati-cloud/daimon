@@ -12,7 +12,7 @@ export type Suggestion = {
 };
 
 /** Current token at cursor — everything after the last unquoted space. */
-function currentToken(input: string): string {
+export function currentToken(input: string): string {
   const trailing = /\s$/.test(input);
   if (trailing) return "";
   const parts = input.split(/\s+/);
@@ -30,7 +30,6 @@ export async function completeNative(
   historyTs: number[] = [],
   tabId?: string,
 ): Promise<{ items: Suggestion[]; token: string }> {
-  void history; void historyTs; // history ghost is handled in Composer, not the dropdown
   const token = currentToken(input);
 
   const raw = await shell.completeNative(input, cwd, tabId).catch(() => []);
@@ -59,7 +58,29 @@ export async function completeNative(
     });
   }
 
-  const result = filtered;
+  // History: full-input prefix matches, most-recent first, replace the whole line.
+  // These take priority over filesystem completions so "cd pro" still shows "cd projects/daimon/".
+  const lowerInput = input.toLowerCase();
+  const historyItems: Suggestion[] = [];
+  const seen = new Set<string>();
+  for (let i = history.length - 1; i >= 0; i--) {
+    const h = history[i]!;
+    if (h.toLowerCase().startsWith(lowerInput) && h.length > input.length && !seen.has(h)) {
+      seen.add(h);
+      historyItems.push({
+        value: h,
+        label: h,
+        hint: historyTs[i] ? new Date(historyTs[i]!).toLocaleDateString() : "",
+        kind: "history" as const,
+        score: history.length - i,
+        replace: "all" as const,
+        ...(historyTs[i] !== undefined ? { ts: historyTs[i] } : {}),
+      });
+    }
+  }
+
+  // History first (most specific/recent wins), then other completions
+  const result = [...historyItems, ...filtered];
 
   return { items: result, token };
 }

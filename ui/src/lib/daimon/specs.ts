@@ -10,6 +10,8 @@
 
 import { useSyncExternalStore } from "react";
 import { tableHeader, tableRow, type Out } from "./parse";
+import { shell } from "./rpc";
+import { toast } from "sonner";
 
 /** The output-render part of a spec: either the whole (flat) file or its `output` section. */
 type SpecRender = {
@@ -143,8 +145,6 @@ export function applySpec(input: string, text: string): Out | null {
 
 async function reload() {
   try {
-    const { shell } = await import("./rpc");
-    const { toast } = await import("sonner");
     const entries = await shell.specList();
     const next: CompiledSpec[] = [];
     for (const e of entries) {
@@ -166,7 +166,6 @@ async function reload() {
 
 /** Load specs and follow file changes (the daemon watches ~/.config/daimon/specs/). */
 export async function loadSpecs() {
-  const { shell } = await import("./rpc");
   shell.onSpecsChanged(() => { void reload(); });
   await reload();
 }

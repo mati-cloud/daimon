@@ -6,39 +6,36 @@
 // once the daemon listens. DAIMON_PERSIST=0 instead ties the daemon to the app
 // (`--exit-with-parent`): closing the app ends the sessions.
 //
-// Every client needs the daemon's token; the window gets it (and the port) in its URL.
+// All privileged commands from the page are proxied here through Electrobun's host IPC
+// and sent to the daemon via its UNIX domain socket (mode 0600, uid-auth, no token).
+// The page reads output via the TCP WebSocket (output-only push, no auth needed).
 //
 // Windows: the app bundles the Linux daemon and runs it inside WSL (distro from the
 // bundled "wsl-distro" file); Windows reaches it through WSL's localhost forwarding.
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { createConnection } from "node:net";
+import { resolve, dirname, join } from "node:path";
 
-export type Daemon = { port: number; token: string };
+export type Daemon = { port: number; socketPath: string };
 
 type Info = {
   port: number;
   token: string;
+  socket: string;
   selfBuild: string;
-  running: { pid: number; port: number; token: string; build: string } | null;
+  running: { pid: number; port: number; token: string; build: string; socket: string } | null;
 };
 
 let tiedProc: ReturnType<typeof Bun.spawn> | null = null; // DAIMON_PERSIST=0: keeps stdin open
 
-/** Open a WebSocket to the daemon; resolves with it open, or null. */
-function open(d: Daemon, timeoutMs = 600): Promise<WebSocket | null> {
+/** Check the TCP output port is reachable (plain TCP connect). */
+function reachable(d: Daemon, timeoutMs = 600): Promise<boolean> {
   return new Promise((done) => {
-    const ws = new WebSocket(`ws://localhost:${d.port}/?token=${encodeURIComponent(d.token)}`);
-    // A refused connection can take seconds to fail on Windows — don't wait for it.
-    const timer = setTimeout(() => { ws.close(); done(null); }, timeoutMs);
-    ws.onopen = () => { clearTimeout(timer); done(ws); };
-    ws.onerror = () => { clearTimeout(timer); done(null); };
+    const sock = createConnection(d.port, "127.0.0.1");
+    const timer = setTimeout(() => { sock.destroy(); done(false); }, timeoutMs);
+    sock.on("connect", () => { clearTimeout(timer); sock.destroy(); done(true); });
+    sock.on("error", () => { clearTimeout(timer); done(false); });
   });
-}
-
-async function reachable(d: Daemon): Promise<boolean> {
-  const ws = await open(d);
-  ws?.close();
-  return !!ws;
 }
 
 async function waitReachable(d: Daemon, ms: number): Promise<boolean> {
@@ -48,17 +45,30 @@ async function waitReachable(d: Daemon, ms: number): Promise<boolean> {
   return false;
 }
 
-/** One request/response round trip. */
-async function request<T>(d: Daemon, msg: object): Promise<T | null> {
-  const ws = await open(d);
-  if (!ws) return null;
+/** One request/response round trip over the UNIX socket. */
+export function request<T>(d: Daemon, msg: object): Promise<T | null> {
   return new Promise((done) => {
-    const timer = setTimeout(() => { ws.close(); done(null); }, 3000);
-    ws.onmessage = (e) => {
-      const ev = JSON.parse(String(e.data));
-      if (ev.type === "response" && ev.req_id === "app") { clearTimeout(timer); ws.close(); done(ev.data as T); }
-    };
-    ws.send(JSON.stringify({ ...msg, req_id: "app" }));
+    const sock = createConnection(d.socketPath);
+    let buf = "";
+    const timer = setTimeout(() => { sock.destroy(); done(null); }, 3000);
+    const msgWithId = JSON.stringify({ req_id: "app", ...msg });
+    sock.on("connect", () => sock.write(msgWithId + "\n"));
+    sock.on("data", (chunk: Buffer) => {
+      buf += chunk.toString();
+      const nl = buf.indexOf("\n");
+      if (nl === -1) return;
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      try {
+        const ev = JSON.parse(line);
+        if (ev.type === "response") {
+          clearTimeout(timer);
+          sock.destroy();
+          done(ev.data as T);
+        }
+      } catch { /* ignore parse errors */ }
+    });
+    sock.on("error", () => { clearTimeout(timer); done(null); });
   });
 }
 
@@ -81,15 +91,15 @@ async function run(cmd: string[], args: string[]): Promise<string> {
   return out.trim();
 }
 
-/** Dev: dev.sh runs the daemon and exports its token and port. */
+/** Dev: dev.sh runs the daemon and exports its socket path and port. */
 async function devDaemon(): Promise<Daemon | null> {
-  const token = process.env.DAIMON_TOKEN;
-  if (!token) {
-    console.error("[daemon] DAIMON_TOKEN not set — start the app through dev.sh");
+  const socketPath = process.env.DAIMON_SOCKET;
+  if (!socketPath) {
+    console.error("[daemon] DAIMON_SOCKET not set — start the app through dev.sh");
     return null;
   }
-  const d = { token, port: Number(process.env.DAIMON_PORT) || 7878 };
-  if (!(await waitReachable(d, 5000))) console.warn("[daemon] dev daemon not reachable on", d.port);
+  const d: Daemon = { socketPath, port: Number(process.env.DAIMON_PORT) || 7878 };
+  if (!(await waitReachable(d, 5000))) console.warn("[daemon] dev daemon not reachable on port", d.port);
   return d;
 }
 
@@ -104,7 +114,7 @@ export async function connectDaemon(isDev: boolean): Promise<Daemon | null> {
     console.error("[daemon] `pty-daemon --info` failed:", err);
     return null;
   }
-  const d: Daemon = { port: info.port, token: info.token };
+  const d: Daemon = { port: info.port, socketPath: info.socket };
 
   // A daemon is already running (the usual case after the first launch).
   if (info.running && (await reachable(d))) {
@@ -134,3 +144,58 @@ export async function connectDaemon(isDev: boolean): Promise<Daemon | null> {
   if (!(await waitReachable(d, 8000))) console.warn("[daemon] not reachable after start");
   return d;
 }
+
+/**
+ * Restart the pty-daemon from the staged update bundle without restarting the whole app.
+ * The staged bundle lives at `${appBundle}.prepared-${hash}` (PreparedUpdateV2 convention).
+ * Returns the new Daemon connection, or null if the staged binary isn't found or start fails.
+ */
+export async function restartDaemon(current: Daemon, stagedHash: string): Promise<Daemon | null> {
+  // macOS app bundle: process.execPath = .../Daimon2.app/Contents/MacOS/Daimon2
+  // so the .app dir is 3 levels up from execPath.
+  const appBundle = process.platform === "darwin"
+    ? resolve(dirname(process.execPath), "..", "..")
+    : resolve(dirname(process.execPath), "..", "..", "app");
+  const stagedBundle = `${appBundle}.prepared-${stagedHash}`;
+  const stagedDaemon = process.platform !== "win32"
+    ? join(stagedBundle, "Contents", "Resources", "app", "pty-daemon")  // macOS/Linux
+    : join(stagedBundle, "app", "pty-daemon");  // Windows
+
+  if (!existsSync(stagedDaemon)) {
+    console.warn("[daemon] staged daemon not found at", stagedDaemon);
+    return null;
+  }
+
+  const cmd = process.platform !== "win32"
+    ? [stagedDaemon]
+    : daemonCommand(); // Windows: WSL path resolution; keep existing helper
+
+  // Check sessions — only restart if none active.
+  const status = await request<{ sessions: number }>(current, { type: "daemonInfo" });
+  if (status && status.sessions > 0) {
+    console.warn(`[daemon] staged restart skipped: ${status.sessions} active session(s)`);
+    return null;
+  }
+
+  // Probe new daemon info to get the port/socket it will use.
+  // Port and socket path are stable across restarts (read from state dir).
+  let newInfo: Info;
+  try {
+    newInfo = JSON.parse(await run(cmd, ["--info"]));
+  } catch (err) {
+    console.error("[daemon] staged --info failed:", err);
+    return null;
+  }
+
+  await request(current, { type: "shutdown" });
+  await Bun.sleep(300);
+  console.log("[daemon]", await run(cmd, ["--detach"]));
+  const nd: Daemon = { port: newInfo.port, socketPath: newInfo.socket };
+  if (!(await waitReachable(nd, 8000))) {
+    console.warn("[daemon] staged daemon not reachable after restart");
+    return null;
+  }
+  console.log("[daemon] restarted from staged bundle", stagedHash);
+  return nd;
+}
+

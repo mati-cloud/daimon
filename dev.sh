@@ -176,11 +176,22 @@ trap cleanup INT TERM EXIT
 # ── 1. Rust pty-daemon (build first so compile errors stop the script) ───────
 log "building Rust workspace..."
 cargo build --manifest-path "$ROOT/Cargo.toml" -p pty-daemon -p daimon
-# Clients need the daemon's token: the app passes it to the window, Vite to a browser.
-export DAIMON_TOKEN="$("$ROOT/target/debug/pty-daemon" --token)"
 log "starting pty-daemon on :$DAIMON_PORT..."
 cargo run -q -p pty-daemon --manifest-path "$ROOT/Cargo.toml" &
 PIDS+=($!)
+
+# Locate the daemon's state dir (matches Rust dirs::state_dir() on each platform).
+if [ "$PLATFORM" = macos ]; then
+  SOCK_DIR="$HOME/Library/Application Support/daimon"
+else
+  SOCK_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/daimon"
+fi
+for _ in $(seq 1 30); do
+  DAIMON_SOCKET="$(ls "$SOCK_DIR/daemon-$DAIMON_PORT.sock" 2>/dev/null)" && break
+  sleep 0.1
+done
+export DAIMON_SOCKET="${DAIMON_SOCKET:-$SOCK_DIR/daemon-$DAIMON_PORT.sock}"
+log "daemon socket: $DAIMON_SOCKET"
 
 # ── 2. Vite dev server (daimon UI) ────────────────────────────────────────────
 log "starting Vite UI..."
@@ -203,7 +214,7 @@ if [ "$WIN_NATIVE" = 1 ]; then
     log "launching Electrobun app (Windows)..."
     # Windows reaches the daemon (:$DAIMON_PORT) and Vite (:7881) through WSL's localhost forwarding.
     # (/p = translate the WSL path to a Windows path.)
-    export WSLENV="${WSLENV:+$WSLENV:}DAIMON_TRANSPARENT:DAIMON_BACKDROP:DAIMON_BLUR:DAIMON_BACKDROP_DLL/p:DAIMON_TOKEN:DAIMON_PORT"
+    export WSLENV="${WSLENV:+$WSLENV:}DAIMON_TRANSPARENT:DAIMON_BACKDROP:DAIMON_BLUR:DAIMON_BACKDROP_DLL/p:DAIMON_PORT"
     (cd "$WIN_STAGE/app" && exec ../tools/bun.exe node_modules/electrobun/bin/electrobun.cjs run </dev/null) &
     PIDS+=($!)
   else

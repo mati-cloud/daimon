@@ -1,6 +1,6 @@
 import { BrowserWindow, ApplicationMenu } from "electrobun/bun";
 import { openExternal } from "electrobun/bun/utils";
-import { connectDaemon } from "./daemon";
+import { connectDaemon, request, type Daemon } from "./daemon";
 import { appLog, appWarn } from "./appLog";
 import { enablePinchZoom } from "./macMagnification";
 import { setupNativeDrag } from "./macWindowDrag";
@@ -17,9 +17,8 @@ const daemon = await connectDaemon(isDev);
 
 const nativeTransparent = process.env.DAIMON_TRANSPARENT !== "0";
 
-const baseUrl = isDev ? "http://localhost:7881" : "views://daimon2/index.html";
+const baseUrl = isDev ? "http://localhost:7881" : (daemon ? `http://localhost:${daemon.port}` : "views://daimon2/index.html");
 const query = [
-  daemon && `daimon_token=${daemon.token}`,
   daemon && `daimon_port=${daemon.port}`,
   `home=${encodeURIComponent(homedir())}`,
   nativeTransparent && "transparent=1",
@@ -136,10 +135,22 @@ hostMessageHandlers.push((msg) => {
   if (msg.type === "keymap-lock" && typeof msg.on === "boolean") setKeyInterceptLock(msg.on);
 });
 
-console.log("[main] window opened →", frontendUrl.replace(/daimon_token=[^&]+/, "daimon_token=…"));
+console.log("[main] window opened →", frontendUrl);
 
 // Auto-update (see updater.ts).
-const updater = startUpdater(isDev, (state) => sendUpdateState(state));
+let currentDaemon = daemon;
+const updater = startUpdater(
+  isDev,
+  (state) => sendUpdateState(state),
+  () => currentDaemon,
+  (nd) => {
+    // Daemon restarted from staged bundle — the new daemon serves updated UI assets.
+    // Reload the page so the browser fetches them; sessions survive in the PTYs.
+    currentDaemon = nd;
+    appLog("[update] daemon restarted; reloading UI from new assets");
+    win.webview.executeJavascript("location.reload()");
+  },
+);
 function sendUpdateState(state: UpdateState) {
   win.webview.executeJavascript(
     `window.dispatchEvent(new CustomEvent("daimon:update", { detail: ${JSON.stringify(state)} }))`,
@@ -149,11 +160,33 @@ hostMessageHandlers.push((msg) => {
   if (msg.type !== "update") return;
   if (msg.action === "state") sendUpdateState(updater.state());
   else if (msg.action === "apply") updater.apply();
+  else if (msg.action === "apply-daemon") {
+    void updater.applyDaemonOnly();
+  }
   else if (msg.action === "check") {
     void updater.check().then((result) => win.webview.executeJavascript(
       `window.dispatchEvent(new CustomEvent("daimon:update-check", { detail: ${JSON.stringify(result)} }))`,
     ));
   }
+});
+
+// Proxy privileged commands from the page to the daemon via UNIX socket.
+// The page sends { type: "daemon-rpc", req_id, payload } and gets back
+// { type: "daemon-rpc-reply", req_id, ok, data } via executeJavascript.
+hostMessageHandlers.push(async (msg) => {
+  if ((msg as { type?: string }).type !== "daemon-rpc") return;
+  const m = msg as { type: string; req_id: string; payload: object };
+  const d = currentDaemon;
+  if (!d) {
+    win.webview.executeJavascript(
+      `window.dispatchEvent(new CustomEvent("daimon:rpc-reply", { detail: ${JSON.stringify({ req_id: m.req_id, ok: false, data: { error: "no daemon" } })} }))`,
+    );
+    return;
+  }
+  const data = await request<unknown>(d, { ...m.payload, req_id: m.req_id });
+  win.webview.executeJavascript(
+    `window.dispatchEvent(new CustomEvent("daimon:rpc-reply", { detail: ${JSON.stringify({ req_id: m.req_id, ok: data !== null, data })} }))`,
+  );
 });
 
 hostMessageHandlers.push((msg) => {

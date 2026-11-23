@@ -32,6 +32,39 @@ pub enum SessionEvent {
     PluginsChanged,
     /// A file in ~/.config/daimon/specs/ was added, changed or removed.
     SpecsChanged,
+    /// Periodic activity probe while a command runs silently (no PTY output).
+    /// Fires every ~10 s after 5 s of quiet. Cleared when the prompt returns.
+    ActivityProbe {
+        tab_id: String,
+        /// Milliseconds since last PTY output (or command start if no output yet).
+        quiet_ms: i64,
+        /// Full process tree rooted at the shell's direct children.
+        processes: Vec<ProbeProcess>,
+        /// Active network connections across the whole process tree.
+        net_connections: Vec<ProbeConn>,
+    },
+}
+
+/// One process in the activity probe tree.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeProcess {
+    pub pid: u32,
+    pub ppid: u32,
+    pub name: String,
+    /// CPU % from `ps` (None if ps unavailable or the process vanished).
+    pub cpu_pct: Option<f32>,
+}
+
+/// One active network connection from `lsof -i`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeConn {
+    pub process: String,
+    pub local: String,
+    pub remote: String,
+    /// TCP state, e.g. "ESTABLISHED", "CLOSE_WAIT". Empty for UDP.
+    pub state: String,
 }
 
 /// Messages sent frontend → WebSocket → session.
@@ -158,6 +191,8 @@ struct SessionState {
     command: Option<String>,
     command_hint: Option<String>,
     started_at: i64,
+    /// ms timestamp of the last PTY output chunk while running (for quiet detection).
+    last_output_at: i64,
     alt_screen: bool,
     /// Output of the running command as sent to the UI — the tail, capped.
     output: String,
@@ -318,6 +353,8 @@ pub struct Session {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Box<dyn MasterPty + Send>,
     state: Arc<Mutex<SessionState>>,
+    /// PID of the shell process (for activity probing).
+    pub _shell_pid: Option<u32>,
 }
 
 impl Session {
@@ -365,6 +402,7 @@ impl Session {
         crate::integration::configure(&mut cmd, kind);
 
         let mut child = pair.slave.spawn_command(cmd).context("spawn shell failed")?;
+        let shell_pid = child.process_id();
         let writer: Box<dyn Write + Send> = pair.master.take_writer().context("take_writer")?;
         let mut reader = pair.master.try_clone_reader().context("clone_reader")?;
         let master = pair.master;
@@ -424,6 +462,7 @@ impl Session {
                                 s.running = true;
                                 s.command = s.command_hint.take();
                                 s.started_at = now_ms();
+                                s.last_output_at = s.started_at;
                                 s.output.clear();
                                 s.modes = Modes::default();
                             }
@@ -431,7 +470,10 @@ impl Session {
                             let alt = s.alt_screen;
                             s.modes.track(&raw, alt);
                             if alt_exit { s.alt_screen = false; s.modes.kitty_alt.clear(); }
-                            if s.running { s.push_output(&data); }
+                            if s.running {
+                                s.push_output(&data);
+                                s.last_output_at = now_ms();
+                            }
                             if prompt {
                                 s.running = false;
                                 s.alt_screen = false;
@@ -452,6 +494,15 @@ impl Session {
                         if cmd_start {
                             let command = st.lock().unwrap().command.clone();
                             let _ = tx.blocking_send(SessionEvent::CommandStart { tab_id: tid.clone(), command });
+                            // Spawn quiet-activity probe: fires every 10 s after 5 s of silence.
+                            if let Some(pid) = shell_pid {
+                                let probe_st = st.clone();
+                                let probe_tx = tx.clone();
+                                let probe_tid = tid.clone();
+                                std::thread::spawn(move || {
+                                    activity_probe(probe_tid, pid, probe_st, probe_tx);
+                                });
+                            }
                         }
                         if prompt {
                             let ctx = extract_context_json(&raw).unwrap_or_default();
@@ -470,7 +521,7 @@ impl Session {
             let _ = tx.blocking_send(SessionEvent::Exit { tab_id: tid, code });
         });
 
-        Ok(Self { tab_id, writer, master, state })
+        Ok(Self { tab_id, writer, master, state, _shell_pid: shell_pid })
     }
 
     pub fn write(&self, data: &str, command: Option<String>) -> Result<()> {
@@ -552,6 +603,130 @@ impl Session {
         std::thread::sleep(std::time::Duration::from_millis(30));
         let _ = self.master.resize(PtySize { cols, rows, pixel_width: 0, pixel_height: 0 });
     }
+}
+
+/// Probe child-process activity while a command runs silently.
+/// Runs on its own thread; exits as soon as the session is no longer running.
+/// Waits 5 s before the first probe, then repeats every 10 s.
+fn activity_probe(tab_id: String, shell_pid: u32, state: Arc<Mutex<SessionState>>, tx: mpsc::Sender<SessionEvent>) {
+    const QUIET_THRESHOLD_MS: i64 = 5_000;
+    const PROBE_INTERVAL_MS: u64 = 10_000;
+
+    std::thread::sleep(std::time::Duration::from_millis(QUIET_THRESHOLD_MS as u64));
+
+    loop {
+        let (running, last_out, started) = {
+            let s = state.lock().unwrap();
+            (s.running, s.last_output_at, s.started_at)
+        };
+        if !running { break; }
+
+        let now = now_ms();
+        let quiet_ms = now - last_out.max(started);
+        if quiet_ms < QUIET_THRESHOLD_MS { break; } // output resumed — stop probing
+
+        // pgrep -P <shell_pid> recursively: full process tree
+        let processes = probe_process_tree(shell_pid);
+
+        // lsof -i across all pids: active TCP/UDP connections with state
+        let all_pids: Vec<u32> = processes.iter().map(|p| p.pid).collect();
+        let net_connections = if all_pids.is_empty() { vec![] } else { probe_network(&all_pids, &processes) };
+        let _ = tx.blocking_send(SessionEvent::ActivityProbe {
+            tab_id: tab_id.clone(),
+            quiet_ms,
+            processes,
+            net_connections,
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(PROBE_INTERVAL_MS));
+    }
+}
+
+/// BFS walk of the process tree rooted at shell_pid's direct children.
+/// One `ps` call fetches pid/ppid/cpu/name for all discovered pids at once.
+fn probe_process_tree(shell_pid: u32) -> Vec<ProbeProcess> {
+    // BFS: collect all descendant PIDs first via repeated pgrep -P
+    let mut all_pids: Vec<u32> = vec![];
+    let mut frontier: Vec<u32> = vec![shell_pid];
+    let mut depth = 0;
+    while !frontier.is_empty() && depth < 8 {
+        depth += 1;
+        let parent_args = frontier.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",");
+        let out = std::process::Command::new("pgrep")
+            .args(["-P", &parent_args])
+            .output();
+        frontier = match out {
+            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter_map(|l| l.trim().parse::<u32>().ok())
+                .filter(|p| *p != shell_pid && !all_pids.contains(p))
+                .collect(),
+            _ => vec![],
+        };
+        all_pids.extend_from_slice(&frontier);
+    }
+    if all_pids.is_empty() { return vec![]; }
+
+    // Single ps call: pid, ppid, %cpu, comm for all pids
+    let pid_arg = all_pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",");
+    let ps_out = std::process::Command::new("ps")
+        .args(["-o", "pid=,ppid=,%cpu=,comm=", "-p", &pid_arg])
+        .output();
+    match ps_out {
+        Ok(o) => {
+            String::from_utf8_lossy(&o.stdout).lines().filter_map(|line| {
+                let mut cols = line.split_whitespace();
+                let pid: u32 = cols.next()?.parse().ok()?;
+                let ppid: u32 = cols.next()?.parse().ok()?;
+                let cpu_pct: f32 = cols.next()?.parse().unwrap_or(0.0);
+                let raw_name = cols.next()?;
+                let name = raw_name.rsplit('/').next().unwrap_or(raw_name).to_string();
+                Some(ProbeProcess { pid, ppid, name, cpu_pct: Some(cpu_pct) })
+            }).collect()
+        }
+        _ => all_pids.iter().map(|&pid| ProbeProcess { pid, ppid: shell_pid, name: pid.to_string(), cpu_pct: None }).collect(),
+    }
+}
+
+fn probe_network(pids: &[u32], processes: &[ProbeProcess]) -> Vec<ProbeConn> {
+    let pid_list = pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",");
+    let out = std::process::Command::new("lsof")
+        .args(["-i", "-nP", "-a", "-p", &pid_list])
+        .output();
+    let o = match out {
+        Ok(o) if o.status.success() && !o.stdout.is_empty() => o,
+        _ => return vec![],
+    };
+    let text = String::from_utf8_lossy(&o.stdout);
+    let mut seen = std::collections::HashSet::new();
+    text.lines().skip(1).filter_map(|line| {
+        // lsof -nP columns: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME [STATE]
+        // NAME = "local->remote" for TCP, "(LISTEN)" appended for listeners
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 9 { return None; }
+        let pid: u32 = cols[1].parse().ok()?;
+        let name_col = cols[8];
+        // skip LISTEN
+        if cols.last().map_or(false, |s| s.contains("LISTEN")) { return None; }
+        let state = if cols.len() >= 10 {
+            cols[9].trim_matches(|c| c == '(' || c == ')').to_string()
+        } else {
+            String::new()
+        };
+        let (local, remote) = if let Some(arrow) = name_col.find("->") {
+            (name_col[..arrow].to_string(), name_col[arrow + 2..].to_string())
+        } else {
+            (name_col.to_string(), String::new())
+        };
+        if remote.is_empty() { return None; }
+        let process = processes.iter()
+            .find(|p| p.pid == pid)
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| cols[0].to_string());
+        let key = format!("{process}{local}{remote}");
+        if !seen.insert(key) { return None; }
+        Some(ProbeConn { process, local, remote, state })
+    }).collect()
 }
 
 fn extract_context_json(data: &str) -> Option<String> {

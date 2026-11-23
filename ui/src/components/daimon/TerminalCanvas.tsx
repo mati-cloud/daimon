@@ -6,13 +6,23 @@ import { wasmBytes } from "@/lib/terminal-wasm/wasm-bytes";
 const FONT_SIZE = 13;
 const FONT_FAMILY = 'Monaco, Menlo, "Ubuntu Mono", monospace';
 const CELL_H = 18; // px per line
-const BG_DEFAULT = 0x0d1117;
-const FG_DEFAULT = 0xe6edf3;
 const DPR = Math.min(typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1, 2);
 
 // The Rust engine's default cell colors (see lib.rs Cell::default).
 const WASM_FG_DEFAULT = 0xffffff;
 const WASM_BG_DEFAULT = 0x000000;
+
+function resolveThemeHex(cssVar: string, fallback: number): number {
+  if (typeof document === "undefined") return fallback;
+  const el = document.createElement("div");
+  el.style.cssText = `position:fixed;visibility:hidden;background-color:${cssVar}`;
+  document.body.appendChild(el);
+  const rgb = getComputedStyle(el).backgroundColor;
+  document.body.removeChild(el);
+  const m = rgb.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+  if (!m) return fallback;
+  return (parseInt(m[1]!) << 16) | (parseInt(m[2]!) << 8) | parseInt(m[3]!);
+}
 
 // ---- WASM singleton --------------------------------------------------------
 let wasmReady: Promise<{ memory: WebAssembly.Memory }> | null = null;
@@ -171,6 +181,10 @@ export function TerminalCanvas({ cols, rows, onReady, onAltChange }: Props) {
   const colsRef = useRef(cols);
   const rowsRef = useRef(rows);
 
+  // Theme colors resolved from CSS vars at mount — updated if theme changes.
+  const bgRef = useRef(0x0d1117);
+  const fgRef = useRef(0xe6edf3);
+
   // CSS px size for the canvas element — set explicitly to avoid 100%/100% resolving
   // against a collapsed ancestor (position:fixed inside an auto-height article).
   const [cssSize, setCssSize] = useState<{ w: number; h: number } | null>(null);
@@ -221,10 +235,10 @@ export function TerminalCanvas({ cols, rows, onReady, onAltChange }: Props) {
         const bold = (flags & 1) !== 0;
         const italic = (flags & 2) !== 0;
         // Map engine defaults to our theme colors.
-        if (fgc === WASM_FG_DEFAULT) fgc = FG_DEFAULT;
-        if (bgc === WASM_BG_DEFAULT) bgc = BG_DEFAULT;
+        if (fgc === WASM_FG_DEFAULT) fgc = fgRef.current;
+        if (bgc === WASM_BG_DEFAULT) bgc = bgRef.current;
 
-        if (bgc !== BG_DEFAULT) {
+        if (bgc !== bgRef.current) {
           bg.push(col, row, 0, 0, 0, 0, ((bgc >> 16) & 255) / 255, ((bgc >> 8) & 255) / 255, (bgc & 255) / 255);
         }
         const ch = code === 0 ? " " : String.fromCodePoint(code);
@@ -239,13 +253,15 @@ export function TerminalCanvas({ cols, rows, onReady, onAltChange }: Props) {
     if (!term.on_alt() && term.cursor_visible()) {
       const cx = term.cursor_col();
       const cy = term.cursor_row();
-      bg.push(cx, cy, 0, 0, 0, 0, ((FG_DEFAULT >> 16) & 255) / 255, ((FG_DEFAULT >> 8) & 255) / 255, (FG_DEFAULT & 255) / 255);
+      const fg = fgRef.current;
+      bg.push(cx, cy, 0, 0, 0, 0, ((fg >> 16) & 255) / 255, ((fg >> 8) & 255) / 255, (fg & 255) / 255);
     }
 
     const vw = c * cw * DPR;
     const vh = r * CELL_H * DPR;
     gl.viewport(0, 0, vw, vh);
-    gl.clearColor(((BG_DEFAULT >> 16) & 255) / 255, ((BG_DEFAULT >> 8) & 255) / 255, (BG_DEFAULT & 255) / 255, 1);
+    const bg0 = bgRef.current;
+    gl.clearColor(((bg0 >> 16) & 255) / 255, ((bg0 >> 8) & 255) / 255, (bg0 & 255) / 255, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     // Upload atlas if it grew this frame.
@@ -301,6 +317,10 @@ export function TerminalCanvas({ cols, rows, onReady, onAltChange }: Props) {
     const canvas = canvasRef.current!;
     const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, premultipliedAlpha: false })!;
     glRef.current = gl;
+
+    // Resolve theme colors from CSS vars — must run after DOM mount.
+    bgRef.current = resolveThemeHex("var(--background)", 0x0d1117);
+    fgRef.current = resolveThemeHex("var(--foreground)", 0xe6edf3);
 
     // Measure real monospace advance for the cell width.
     const meas = document.createElement("canvas").getContext("2d")!;

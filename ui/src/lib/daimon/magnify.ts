@@ -35,19 +35,19 @@ function announce(scale: number) {
   window.dispatchEvent(new CustomEvent("daimon:magnify", { detail: { scale } }));
 }
 
-export function installMagnify(target: HTMLElement): () => void {
+export function installMagnify(target: HTMLElement): { destroy: () => void; zoomStep: (delta: number) => void; zoomReset: () => void } {
   // Current (drawn) and target transform: translate(x, y) scale(s), origin top-left.
   let s = 1, x = 0, y = 0;
   let ts = 1, tx = 0, ty = 0;
   let frame = 0;
   let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Live scale readout (e.g. "1.3×") shown while pinching; hidden at 100%.
+  // Live scale readout (e.g. "110%") shown while pinching; hidden at 100%.
   const badge = document.createElement("div");
   badge.className = "magnify-badge";
   let badgeTimer: ReturnType<typeof setTimeout> | null = null;
   const showBadge = (scale: number) => {
-    badge.textContent = `${scale.toFixed(1)}×`;
+    badge.textContent = scale > 1.001 || scale < 0.999 ? `${Math.round(scale * 100)}%` : "default";
     if (!badge.isConnected) document.body.appendChild(badge);
     badge.classList.toggle("magnify-badge-show", scale > 1.001);
     if (badgeTimer) clearTimeout(badgeTimer);
@@ -192,7 +192,8 @@ export function installMagnify(target: HTMLElement): () => void {
   // Passive (never prevents anything): only to drop the cursor when the modifier is let go.
   window.addEventListener("keyup", onKeyUp);
   window.addEventListener("blur", onBlur);
-  return () => {
+
+  const destroy = () => {
     window.removeEventListener("wheel", onWheel, { capture: true });
     window.removeEventListener("resize", onResize);
     for (const [type, fn] of [...gestures, ...pointer]) window.removeEventListener(type, fn, { capture: true });
@@ -207,4 +208,15 @@ export function installMagnify(target: HTMLElement): () => void {
     apply();
     announce(1);
   };
+
+  const zoomStep = (delta: number) => {
+    const next = Math.min(MAX, Math.max(0.5, Math.round(ts * 10 + delta) / 10));
+    zoomTo(next, innerWidth / 2, innerHeight / 2);
+    if (next === 1) { if (settleTimer) clearTimeout(settleTimer); settleTimer = null; }
+    else { if (settleTimer) clearTimeout(settleTimer); settleTimer = setTimeout(settle, SETTLE_MS); }
+  };
+
+  const zoomReset = () => { ts = 1; tx = 0; ty = 0; animate(); showBadge(1); };
+
+  return { destroy, zoomStep, zoomReset };
 }

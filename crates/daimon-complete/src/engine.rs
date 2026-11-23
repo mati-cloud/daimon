@@ -46,8 +46,11 @@ pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<S
 
     let cmd = if idx == 0 { &partial } else { &words[0] };
     if idx == 0 {
-        // Completing the command name itself — no spec needed
-        return filesystem_completions(&partial, cwd, true, remote);
+        // Completing the command name itself — no spec needed.
+        // For explicit paths (./foo, /usr/bin/foo, ~/scripts/foo) include files; for bare
+        // names list only dirs so the cwd doesn't pollute the dropdown with non-executables.
+        let is_path = partial.contains('/') || partial.starts_with('~');
+        return filesystem_completions(&partial, cwd, !is_path, remote);
     }
 
     let Some(spec) = global().get(cmd) else {

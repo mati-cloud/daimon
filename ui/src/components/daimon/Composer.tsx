@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FolderIcon, FileIcon, ClockIcon } from "lucide-react";
-import { applySuggestion, completeNative, type Suggestion } from "@/lib/daimon/complete";
+import { applySuggestion, completeNative, currentToken, type Suggestion } from "@/lib/daimon/complete";
 import { displayPath } from "@/lib/daimon/world";
 import { sendRaw, onAltScreenChange, getAltScreen } from "@/lib/daimon/shell";
 import { shell } from "@/lib/daimon/rpc";
@@ -24,9 +24,14 @@ function commonPrefix(values: string[]): string {
   return p;
 }
 
-/** Inline ghost text: what the top suggestion adds to the typed token, if it extends it. */
-function ghostOf(top: Suggestion | undefined, token: string): string {
-  return top && top.replace === "token" && token && top.value.toLowerCase().startsWith(token.toLowerCase())
+/** Inline ghost text: what the top suggestion adds beyond the typed input. */
+function ghostOf(top: Suggestion | undefined, token: string, input: string): string {
+  if (!top) return "";
+  // History items (replace="all"): ghost is the rest of the full command
+  if (top.replace === "all" && top.value.toLowerCase().startsWith(input.toLowerCase()) && top.value.length > input.length)
+    return top.value.slice(input.length);
+  // Token-replace items: ghost is the rest of the current token
+  return top.replace === "token" && token && top.value.toLowerCase().startsWith(token.toLowerCase())
     ? top.value.slice(token.length)
     : "";
 }
@@ -124,12 +129,12 @@ export function Composer({
 
   const visible = open && items.length >= 2;
   const top = items[Math.min(active, items.length - 1)];
-  // Inline ghost: the rest of the top suggestion (flag, subcommand, file, folder…).
-  const specGhost = ghostOf(top, token);
+  // Inline ghost: the rest of the top suggestion (history full-line or token extension).
+  const specGhost = ghostOf(top, token, value);
 
-  // History ghost: most-recent match for the full input — only when no spec/flag completions available
+  // History ghost fallback: only when complete.ts found nothing at all
   const hasNativeItems = items.some(i => i.kind !== "history");
-  const historyGhost = !specGhost && !hasNativeItems && value.trim().length > 0
+  const historyGhost = !specGhost && !hasNativeItems && items.length === 0 && value.trim().length > 0
     ? (() => {
         const lower = value.toLowerCase();
         for (let i = history.length - 1; i >= 0; i--) {
@@ -209,11 +214,12 @@ export function Composer({
     };
   }, [interactive]);
 
-  const accept = (i = active, fromItems?: Suggestion[]): string => {
+  const accept = (i = active, fromItems?: Suggestion[], withToken?: string): string => {
     const src = fromItems ?? items;
     const s = src[Math.min(i, src.length - 1)];
     if (!s) return valueRef.current;
-    const next = applySuggestion(valueRef.current, token, s.value, s);
+    const tok = withToken ?? token;
+    const next = applySuggestion(valueRef.current, tok, s.value, s);
     const trailing = (s.kind === "file" || s.kind === "dir") && s.value.endsWith("/") ? next : next + " ";
     const final = s.replace === "all" ? next + " " : trailing;
     // Suppress the re-completion that fires immediately after Tab acceptance
@@ -229,26 +235,32 @@ export function Composer({
     if (visible) { accept(); return; }
     // If no items yet but completion in-flight, wait for it
     let current = items;
-    let currentToken = token;
+    let resolvedToken = token;
     if (current.length === 0 && completePromise.current) {
       const result = await completePromise.current;
-      if (result) { current = result.items; currentToken = result.token; setItems(result.items); setToken(result.token); }
+      // After async wait, check the input hasn't changed — stale result causes "cd proprojects/" duplication
+      if (result && result.token === currentToken(valueRef.current)) {
+        current = result.items; resolvedToken = result.token; setItems(result.items); setToken(result.token);
+      } else {
+        // Input changed while waiting; completions are for a different buffer — bail out
+        return;
+      }
     }
     // Compute ghost inline from current (state may not have updated yet)
     const currentTop = current[0];
-    const currentGhost = ghostOf(currentTop, currentToken);
+    const currentGhost = ghostOf(currentTop, resolvedToken, valueRef.current);
     // Paths with several matches complete like a shell: the part they share, then the list.
     const isPath = currentTop?.kind === "file" || currentTop?.kind === "dir";
-    if (current.length === 1 || (current.length > 0 && currentGhost && !isPath)) { accept(0, current); return; }
+    if (current.length === 1 || (current.length > 0 && currentGhost && !isPath)) { accept(0, current, resolvedToken); return; }
     if (current.length > 1 && isPath) {
       const common = commonPrefix(current.map((i) => i.value));
-      if (common.length > currentToken.length && !/[\s'"\\]/.test(common)) {
-        setInputValue(value.slice(0, value.length - currentToken.length) + common);
+      if (common.length > resolvedToken.length && !/[\s'"\\]/.test(common)) {
+        setInputValue(valueRef.current.slice(0, valueRef.current.length - resolvedToken.length) + common);
         return;
       }
     }
     if (current.length > 1) { dismissed.current = false; setOpen(true); return; }
-    if (historyGhost) { setInputValue(value + historyGhost); setOpen(false); return; }
+    if (historyGhost) { setInputValue(valueRef.current + historyGhost); setOpen(false); return; }
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

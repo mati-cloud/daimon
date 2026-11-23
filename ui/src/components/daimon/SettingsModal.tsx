@@ -40,6 +40,8 @@ type Props = {
   onShowBadges: (v: boolean) => void;
   showPowerline: boolean;
   onShowPowerline: (v: boolean) => void;
+  hideKeys: boolean;
+  onHideKeys: (v: boolean) => void;
 };
 
 const CATEGORIES = [
@@ -295,7 +297,7 @@ function KeymapsPanel({ onStartCapture }: { onStartCapture: (s: { id: string; de
   );
 }
 
-export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontSize, showBadges, onShowBadges, showPowerline, onShowPowerline }: Props) {
+export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontSize, showBadges, onShowBadges, showPowerline, onShowPowerline, hideKeys, onHideKeys }: Props) {
   const shown = usePresence(open);   // stays mounted while it animates out
   const [category, setCategory] = useState<CategoryId>("appearance");
   const [search, setSearch] = useState("");
@@ -488,6 +490,19 @@ export function SettingsModal({ open, onClose, theme, onTheme, fontSize, onFontS
           onChange={(v) => {
             onShowPowerline(v);
             shell.prefSet("show-powerline", v ? "1" : "0").catch(() => {});
+          }}
+        />
+      ),
+    },
+    {
+      category: "appearance",
+      label: "Hide keyboard hints",
+      node: (
+        <Toggle
+          value={hideKeys}
+          onChange={(v) => {
+            onHideKeys(v);
+            shell.prefSet("hide-keys", v ? "1" : "0").catch(() => {});
           }}
         />
       ),

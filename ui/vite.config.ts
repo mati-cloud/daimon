@@ -1,13 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import path from "path";
 import { wraith } from "wraithterm/vite";
 import type { Plugin } from "vite";
 
 // Content-Security-Policy for the shipped page (build only: Vite's dev server needs inline
-// scripts for HMR). Any injected script is limited to the app's own code and the local
-// daemon: no remote scripts, frames, forms or connections.
+// scripts for HMR). The page is now served from http://localhost:<port>/ (the daemon's
+// built-in asset server) rather than views://daimon2/, so script-src allows that origin.
 //   script-src blob:            plugins and their module shims are imported from blob: URLs
 //   'wasm-unsafe-eval'          the terminal renderer's WebAssembly
 //   style-src 'unsafe-inline'   coloured output is <span style>, plugin CSS is a <style>
@@ -15,11 +14,11 @@ import type { Plugin } from "vite";
 //   connect-src ws://localhost  the pty-daemon (port chosen at runtime)
 export const CSP = [
   "default-src 'none'",
-  "script-src 'self' blob: 'wasm-unsafe-eval'",
+  "script-src 'self' http://localhost:* blob: 'wasm-unsafe-eval'",
   "worker-src 'self' blob:",
-  "style-src 'self' 'unsafe-inline'",
+  "style-src 'self' http://localhost:* 'unsafe-inline'",
   "img-src 'self' data: blob:",
-  "font-src 'self' data:",
+  "font-src 'self' http://localhost:* data:",
   "media-src 'self' data: blob:",
   "connect-src 'self' ws://localhost:* ws://127.0.0.1:*",
   "object-src 'none'",
@@ -47,7 +46,7 @@ export default defineConfig({
   resolve: {
     dedupe: ["react", "react-dom"],
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": new URL("./src", import.meta.url).pathname,
     },
   },
   build: {

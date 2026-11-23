@@ -104,8 +104,27 @@ export function Kbd({ children, size = "sm", className = "" }: { children: React
   );
 }
 
-/** Renders a combo string as separate keycaps. */
+// ── Global keycap visibility ──────────────────────────────────────────────────
+// One flag gates every <Keys> in the app (incl. plugin-drawn header buttons).
+// External store so toggling from settings re-renders all live keycaps.
+let keysHidden = false;
+const visListeners = new Set<() => void>();
+export function setKeysHidden(hidden: boolean) {
+  if (keysHidden === hidden) return;
+  keysHidden = hidden;
+  visListeners.forEach((l) => l());
+}
+function useKeysHidden(): boolean {
+  return useSyncExternalStore(
+    (cb) => { visListeners.add(cb); return () => { visListeners.delete(cb); }; },
+    () => keysHidden,
+    () => false,
+  );
+}
+
+/** Renders a combo string as separate keycaps. Hidden globally via setKeysHidden. */
 export function Keys({ combo, size = "sm", className = "" }: { combo: string; size?: Size; className?: string }) {
+  if (useKeysHidden()) return null;
   return (
     <span className={`inline-flex shrink-0 items-center gap-1 ${className}`}>
       {splitCombo(combo).map((t, i) => (

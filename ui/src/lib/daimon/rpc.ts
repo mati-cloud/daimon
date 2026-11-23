@@ -1,13 +1,27 @@
 import type { GitBranchNode } from "./shell";
 /// WebSocket transport shim — identical shell API surface to the Electrobun RPC version.
-/// Connects to the Rust pty-daemon at ws://localhost:<port>/?token=<token>.
 ///
-/// The daemon only accepts clients with its token. The app passes it (and the port) in
-/// the page URL — ?daimon_token=…&daimon_port=… — and we keep it in sessionStorage so
-/// reloads work after the URL is cleaned up. There is no other way in: a plain browser tab
-/// gets no token, and the daemon also refuses any web origin but the app's own.
+/// Architecture (split channel for maximum security):
+///  - TCP WebSocket: output-only push from daemon → no auth, no token, page reads output directly
+///  - All commands/writes: proxied through Electrobun host IPC → host UNIX socket → daemon
+///    The page cannot reach the UNIX socket (WKWebView WebSocket API is TCP-only).
+///    Commands route: page __electrobunSendToHost({type:"daemon-rpc",...}) → Bun host
+///       → net.createConnection(socketPath) → daemon → response back via executeJavascript
+///       → daimon:rpc-reply CustomEvent → pending request resolved.
+///
+/// The page learns the TCP port from the URL (daimon_port=). No token in page, ever.
 
-type Creds = { token: string; port: number };
+type DaemonEvent =
+  | { type: "output"; tab_id: string; data: string }
+  | { type: "exit"; tab_id: string; code: number }
+  | { type: "prompt"; tab_id: string; context: string }
+  | { type: "commandStart"; tab_id: string; command?: string }
+  | { type: "altScreenEnter"; tab_id: string }
+  | { type: "altScreenExit"; tab_id: string }
+  | { type: "response"; req_id: string; ok: boolean; data: unknown }
+  | { type: "pluginsChanged" }
+  | { type: "specsChanged" }
+  | { type: "activityProbe"; tab_id: string; quiet_ms: number; processes: { pid: number; ppid: number; name: string; cpu_pct: number | null }[]; net_connections: { process: string; local: string; remote: string; state: string }[] };
 
 /** A plugin file as the daemon reports it. `source` only when approved (see plugins.rs). */
 export type PluginEntry = {
@@ -24,23 +38,22 @@ export type PluginEntry = {
 
 /** A declarative output spec as the daemon reports it (data-only JSON, see specs.rs). */
 export type SpecEntry = { name: string; file: string; source: string };
-const CREDS_KEY = "daimon-daemon";
 
-function credsFromUrl(): Creds | null {
+// TCP port from URL param (daimon_port=). No token — TCP channel is output-only.
+function portFromUrl(): number | null {
   const url = new URL(window.location.href);
-  const token = url.searchParams.get("daimon_token");
-  if (!token) return null;
-  const port = Number(url.searchParams.get("daimon_port")) || 7878;
-  url.searchParams.delete("daimon_token");
+  const port = url.searchParams.get("daimon_port");
+  if (!port) return null;
+  const n = Number(port);
   url.searchParams.delete("daimon_port");
   history.replaceState(history.state, "", url);
-  return { token, port };
+  return n || null;
 }
 
-let creds: Creds | null = (() => {
-  const fromUrl = credsFromUrl();
-  if (fromUrl) { try { sessionStorage.setItem(CREDS_KEY, JSON.stringify(fromUrl)); } catch { /**/ } return fromUrl; }
-  try { const saved = sessionStorage.getItem(CREDS_KEY); return saved ? JSON.parse(saved) as Creds : null; } catch { return null; }
+let daemonPort: number | null = (() => {
+  const fromUrl = portFromUrl();
+  if (fromUrl) { try { sessionStorage.setItem("daimon-port", String(fromUrl)); } catch { /**/ } return fromUrl; }
+  try { const saved = sessionStorage.getItem("daimon-port"); return saved ? Number(saved) : null; } catch { return null; }
 })();
 
 export type ShellContext = {
@@ -61,16 +74,10 @@ export type ShellContext = {
   env?: Record<string, string>;
 };
 
-type DaemonEvent =
-  | { type: "output"; tab_id: string; data: string }
-  | { type: "exit"; tab_id: string; code: number }
-  | { type: "prompt"; tab_id: string; context: string }
-  | { type: "commandStart"; tab_id: string; command?: string }
-  | { type: "altScreenEnter"; tab_id: string }
-  | { type: "altScreenExit"; tab_id: string }
-  | { type: "response"; req_id: string; ok: boolean; data: unknown }
-  | { type: "pluginsChanged" }
-  | { type: "specsChanged" };
+export type ProbeProcess = { pid: number; ppid: number; name: string; cpuPct: number | null };
+export type ProbeConn = { process: string; local: string; remote: string; state: string };
+export type ActivityProbe = { tabId: string; quietMs: number; processes: ProbeProcess[]; netConnections: ProbeConn[] };
+type ActivityProbeListener = (probe: ActivityProbe) => void;
 
 type OutputListener        = (tabId: string, data: string) => void;
 type ExitListener          = (tabId: string, code: number) => void;
@@ -82,19 +89,35 @@ const exitListeners              = new Set<ExitListener>();
 const contextListeners           = new Set<ContextListener>();
 const commandStartListeners      = new Set<CommandStartListener>();
 const commandCompleteListeners   = new Set<ContextListener>();
+const activityProbeListeners     = new Set<ActivityProbeListener>();
 // Tracks tabs where a commandStart fired but the follow-up prompt hasn't yet.
 const pendingCommandComplete     = new Set<string>();
 
 // Cache last context per tab so late onContext subscribers get it immediately
 const lastContext = new Map<string, ShellContext>();
+// Latest activity probe per tab (cleared on prompt)
+const latestProbe = new Map<string, ActivityProbe>();
+const probeSubscribers = new Set<() => void>();
+export const getLatestProbe = (tabId: string): ActivityProbe | undefined => latestProbe.get(tabId);
+export const subscribeProbe = (fn: () => void): (() => void) => { probeSubscribers.add(fn); return () => probeSubscribers.delete(fn); };
 
 // Pending request/response promises keyed by req_id
 let reqSeq = 0;
 const pendingRequests = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
+// ── Command channel: host IPC proxy ─────────────────────────────────────────
+// All commands (write, resize, attach, git queries, etc.) go through the Bun host.
+// The host proxies them to the daemon UNIX socket and relays the response back
+// via a "daimon:rpc-reply" CustomEvent.
+
+function hostSend(payload: object): void {
+  (window as { __electrobunSendToHost?: (m: unknown) => void }).__electrobunSendToHost?.(
+    { type: "daemon-rpc", req_id: undefined, payload }
+  );
+}
+
 function request<T>(msg: object, timeoutMs = 5000): Promise<T> {
   const req_id = `r${++reqSeq}`;
-  const json = JSON.stringify({ ...msg, req_id });
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingRequests.delete(req_id);
@@ -104,15 +127,29 @@ function request<T>(msg: object, timeoutMs = 5000): Promise<T> {
       resolve: (v) => { clearTimeout(timer); resolve(v as T); },
       reject:  (e) => { clearTimeout(timer); reject(e); },
     });
-    if (ws?.readyState === WebSocket.OPEN) ws.send(json);
-    else pending.push(json);
+    (window as { __electrobunSendToHost?: (m: unknown) => void }).__electrobunSendToHost?.(
+      { type: "daemon-rpc", req_id, payload: msg }
+    );
   });
 }
 
-// ── WebSocket (auto-reconnect) ───────────────────────────────────────────────
+// Listen for responses relayed back from the host.
+window.addEventListener("daimon:rpc-reply", (e: Event) => {
+  const ev = (e as CustomEvent<{ req_id: string; ok: boolean; data: unknown }>).detail;
+  const p = pendingRequests.get(ev.req_id);
+  if (p) {
+    pendingRequests.delete(ev.req_id);
+    if (ev.ok) p.resolve(ev.data);
+    else {
+      const d = ev.data as { error?: unknown } | null;
+      p.reject(new Error(typeof d?.error === "string" ? d.error : ev.data == null ? "daemon unreachable" : String(ev.data)));
+    }
+  }
+});
+
+// ── WebSocket (output-only push) ─────────────────────────────────────────────
 
 let ws: WebSocket | null = null;
-const pending: string[] = [];
 let everConnected = false;
 
 /** Main-thread time spent on daemon messages (read by bench mode, see bench.ts). */
@@ -126,13 +163,12 @@ export function onReconnect(fn: () => void): () => void {
 }
 
 async function connect() {
-  if (!creds) {
-    console.warn("[rpc] no daemon token — start daimon through the app (or dev.sh)");
+  if (!daemonPort) {
+    console.warn("[rpc] no daemon port — start daimon through the app (or dev.sh)");
     return;
   }
-  ws = new WebSocket(`ws://localhost:${creds.port}/?token=${encodeURIComponent(creds.token)}`);
+  ws = new WebSocket(`ws://localhost:${daemonPort}/ws`);
   ws.onopen = () => {
-    while (pending.length) ws!.send(pending.shift()!);
     // Events sent while we were away are gone: let the UI resync its sessions.
     if (everConnected) reconnectListeners.forEach((fn) => fn());
     everConnected = true;
@@ -159,6 +195,7 @@ async function connect() {
       }
       perf.promptAt = performance.now();
       lastContext.set(ev.tab_id, ctx);
+      if (latestProbe.delete(ev.tab_id)) probeSubscribers.forEach((fn) => fn());
       contextListeners.forEach((fn) => fn(ev.tab_id, ctx));
       if (pendingCommandComplete.delete(ev.tab_id)) {
         commandCompleteListeners.forEach((fn) => fn(ev.tab_id, ctx));
@@ -174,26 +211,16 @@ async function connect() {
       pluginsChangedListeners.forEach((fn) => fn());
     } else if (ev.type === "specsChanged") {
       specsChangedListeners.forEach((fn) => fn());
-    } else if (ev.type === "response") {
-      const p = pendingRequests.get(ev.req_id);
-      if (p) {
-        pendingRequests.delete(ev.req_id);
-        if (ev.ok) p.resolve(ev.data);
-        else {
-          const d = ev.data as { error?: unknown } | null;
-          p.reject(new Error(typeof d?.error === "string" ? d.error : String(ev.data)));
-        }
-      }
+    } else if (ev.type === "activityProbe") {
+      const probe: ActivityProbe = { tabId: ev.tab_id, quietMs: ev.quiet_ms, processes: ev.processes.map(p => ({ pid: p.pid, ppid: p.ppid, name: p.name, cpuPct: p.cpu_pct })), netConnections: ev.net_connections.map(c => ({ process: c.process, local: c.local, remote: c.remote, state: c.state })) };
+      latestProbe.set(ev.tab_id, probe);
+      probeSubscribers.forEach((fn) => fn());
+      activityProbeListeners.forEach((fn) => fn(probe));
     }
+    // Note: "response" events no longer arrive on the TCP WS — commands go via host IPC.
   };
 }
 void connect();
-
-function send(msg: object) {
-  const json = JSON.stringify(msg);
-  if (ws?.readyState === WebSocket.OPEN) ws.send(json);
-  else pending.push(json);
-}
 
 // ── shell API ────────────────────────────────────────────────────────────────
 
@@ -230,18 +257,19 @@ export const shell = {
   onCommandStart: (fn: CommandStartListener) => { commandStartListeners.add(fn);       return () => commandStartListeners.delete(fn); },
   onCommandComplete: (fn: ContextListener)   => { commandCompleteListeners.add(fn);    return () => commandCompleteListeners.delete(fn); },
   onAltScreen:    (fn: AltScreenListener)    => { altScreenListeners.add(fn);     return () => altScreenListeners.delete(fn); },
+  onActivityProbe: (fn: ActivityProbeListener) => { activityProbeListeners.add(fn); return () => activityProbeListeners.delete(fn); },
   /** A file in ~/.config/daimon/plugins/ changed (the daemon watches the folder). */
   onPluginsChanged: (fn: () => void)         => { pluginsChangedListeners.add(fn); return () => pluginsChangedListeners.delete(fn); },
   /** A file in ~/.config/daimon/specs/ changed (the daemon watches the folder). */
   onSpecsChanged:   (fn: () => void)         => { specsChangedListeners.add(fn);   return () => specsChangedListeners.delete(fn); },
 
-  write:  (tabId: string, data: string) => { send({ type: "write", tab_id: tabId, data }); return Promise.resolve(); },
+  write:  (tabId: string, data: string) => { hostSend({ type: "write", tab_id: tabId, data }); return Promise.resolve(); },
   /** Make a resumed full-screen program repaint (resize dance → SIGWINCH). */
-  redraw: (tabId: string) => { send({ type: "redraw", tab_id: tabId }); return Promise.resolve(); },
+  redraw: (tabId: string) => { hostSend({ type: "redraw", tab_id: tabId }); return Promise.resolve(); },
   /** PTY out of canonical mode (a raw-mode program like ssh's live session owns it). */
   ttyRaw: (tabId: string) => request<boolean>({ type: "ttyRaw", tab_id: tabId }),
   /** Write that starts a command; the daemon remembers `command` to label it on reattach. */
-  writeCommand: (tabId: string, data: string, command: string) => { send({ type: "write", tab_id: tabId, data, command }); return Promise.resolve(); },
+  writeCommand: (tabId: string, data: string, command: string) => { hostSend({ type: "write", tab_id: tabId, data, command }); return Promise.resolve(); },
   /**
    * Reattach to a tab's shell after the UI (re)started. Also replays the last prompt
    * context to onContext listeners, as if the prompt had just been drawn.
@@ -259,14 +287,14 @@ export const shell = {
   resize: (tabId: string, cols: number, rows: number) => {
     const c = Math.min(Math.max(cols, 10), 500);
     const r = Math.min(Math.max(rows, 2), 300);
-    send({ type: "resize", tab_id: tabId, cols: c, rows: r });
+    hostSend({ type: "resize", tab_id: tabId, cols: c, rows: r });
     return Promise.resolve();
   },
-  ready:  (tabId: string, cwd?: string) => { send({ type: "write", tab_id: tabId, data: "", cwd }); return Promise.resolve(); },
+  ready:  (tabId: string, cwd?: string) => { hostSend({ type: "write", tab_id: tabId, data: "", cwd }); return Promise.resolve(); },
   hasReady: (tabId: string) => lastContext.has(tabId),
   /** The last prompt context of a tab, if it has drawn a prompt. */
   context: (tabId: string): ShellContext | undefined => lastContext.get(tabId),
-  close:  (tabId: string) => { send({ type: "close", tab_id: tabId }); return Promise.resolve(); },
+  close:  (tabId: string) => { hostSend({ type: "close", tab_id: tabId }); return Promise.resolve(); },
 
   // Stubs — backend support needed for these
   complete:            () => Promise.resolve([] as { type: "plain" | "file" | "dir"; value: string }[]),
@@ -327,3 +355,4 @@ export const shell = {
   describeResource:    (..._args: unknown[]) => Promise.resolve(""),
   getNodeEvents:       (..._args: unknown[]) => Promise.resolve([] as { type: string; reason: string; age: string; message: string }[]),
 };
+

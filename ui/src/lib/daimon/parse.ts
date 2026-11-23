@@ -642,6 +642,8 @@ function lsEntry(line: string): LsEntry | null {
 export function tableHeader(firstLine: string): { starts: number[]; names: string[] } | null {
   // Skip help/usage text: section headers end with ":" or first line is indented
   if (firstLine.trimStart() !== firstLine || firstLine.trimEnd().endsWith(":")) return null;
+  // Skip curl verbose / HTTP header lines: * info, > request, < response
+  if (/^[*><]\s/.test(firstLine)) return null;
   const starts: number[] = [];
   const names: string[] = [];
   // Runs of non-space chars separated by 2+ spaces give the column positions

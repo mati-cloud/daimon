@@ -24,7 +24,8 @@ import * as jsxRuntime from "react/jsx-runtime";
 import { useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import htm from "htm";
 import { toast } from "sonner";
-import { shell, openInBrowser, type ShellContext, type PluginEntry } from "./rpc";
+import { shell, openInBrowser, type ShellContext, type PluginEntry, type ActivityProbe, type ProbeProcess, type ProbeConn } from "./rpc";
+export type { ActivityProbe, ProbeProcess, ProbeConn };
 import { inTerminal } from "./tuiTerminal";
 import { setKeyLock } from "./keyLock";
 import { Keys, Kbd } from "@/components/daimon/Kbd";
@@ -192,6 +193,13 @@ export function onCommandStart(fn: (command: string) => void): () => void {
   return () => { commandStartListeners.delete(fn); };
 }
 
+/** Calls `fn` when the daemon probes a silently-running command for activity.
+ *  Fires every ~10 s after 5 s of no PTY output. Stops when the prompt returns.
+ *  Returns an unsubscribe function. */
+export function onActivityProbe(fn: (probe: ActivityProbe) => void): () => void {
+  return shell.onActivityProbe(fn);
+}
+
 const subscribeContext = (fn: () => void) => {
   contextListeners.add(fn);
   return () => { contextListeners.delete(fn); };
@@ -256,6 +264,7 @@ export const pluginApi = {
   onShellContext,
   onCommandStart,
   onCommandComplete,
+  onActivityProbe,
   watchEnv,
   runCommand,
   focusComposer,
