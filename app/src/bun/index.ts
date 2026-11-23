@@ -1,6 +1,6 @@
 import { BrowserWindow, ApplicationMenu } from "electrobun/bun";
 import { openExternal } from "electrobun/bun/utils";
-import { connectDaemon, request, type Daemon } from "./daemon";
+import { connectDaemon, requestEnvelope, type Daemon } from "./daemon";
 import { appLog, appWarn } from "./appLog";
 import { enablePinchZoom } from "./macMagnification";
 import { setupNativeDrag } from "./macWindowDrag";
@@ -183,9 +183,12 @@ hostMessageHandlers.push(async (msg) => {
     );
     return;
   }
-  const data = await request<unknown>(d, { ...m.payload, req_id: m.req_id });
+  const env = await requestEnvelope(d, { ...m.payload, req_id: m.req_id });
+  const reply = env
+    ? { req_id: m.req_id, ok: env.ok, data: env.data }
+    : { req_id: m.req_id, ok: false, data: { error: "daemon unreachable" } };
   win.webview.executeJavascript(
-    `window.dispatchEvent(new CustomEvent("daimon:rpc-reply", { detail: ${JSON.stringify({ req_id: m.req_id, ok: data !== null, data })} }))`,
+    `window.dispatchEvent(new CustomEvent("daimon:rpc-reply", { detail: ${JSON.stringify(reply)} }))`,
   );
 });
 

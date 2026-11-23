@@ -128,7 +128,7 @@ function request<T>(msg: object, timeoutMs = 5000): Promise<T> {
       reject:  (e) => { clearTimeout(timer); reject(e); },
     });
     (window as { __electrobunSendToHost?: (m: unknown) => void }).__electrobunSendToHost?.(
-      { type: "daemon-rpc", req_id, payload: msg }
+      { type: "daemon-rpc", req_id, payload: { ...msg, host_timeout_ms: timeoutMs } }
     );
   });
 }

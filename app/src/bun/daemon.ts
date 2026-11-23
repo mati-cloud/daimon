@@ -45,12 +45,22 @@ async function waitReachable(d: Daemon, ms: number): Promise<boolean> {
   return false;
 }
 
-/** One request/response round trip over the UNIX socket. */
-export function request<T>(d: Daemon, msg: object): Promise<T | null> {
+/** One request/response round trip over the UNIX socket.
+ *  Resolves the daemon's reply envelope `{ok, data}` — where `data` may legitimately be
+ *  null (e.g. image/prefGet/linkPreview miss). Resolves `null` ONLY on transport failure
+ *  (no daemon, connect error, timeout) so callers can tell "no daemon" from "null result". */
+export function requestEnvelope(d: Daemon, msg: object): Promise<{ ok: boolean; data: unknown } | null> {
+  // Slow commands (exec, image, linkPreview, git, daemonInfo, pluginApprove) carry their
+  // own budget; the host must outwait the daemon or it destroys the socket mid-reply
+  // (broken pipe) and the page gets a false "daemon unreachable". `host_timeout_ms` is the
+  // page's own deadline (rpc.ts); `timeout_ms` is exec's daemon budget. Default 3s.
+  const m = msg as { host_timeout_ms?: number; timeout_ms?: number };
+  const budget = m.host_timeout_ms ?? m.timeout_ms ?? 3000;
+  const timeoutMs = budget + 2000;
   return new Promise((done) => {
     const sock = createConnection(d.socketPath);
     let buf = "";
-    const timer = setTimeout(() => { sock.destroy(); done(null); }, 3000);
+    const timer = setTimeout(() => { sock.destroy(); done(null); }, timeoutMs);
     const msgWithId = JSON.stringify({ req_id: "app", ...msg });
     sock.on("connect", () => sock.write(msgWithId + "\n"));
     sock.on("data", (chunk: Buffer) => {
@@ -64,12 +74,18 @@ export function request<T>(d: Daemon, msg: object): Promise<T | null> {
         if (ev.type === "response") {
           clearTimeout(timer);
           sock.destroy();
-          done(ev.data as T);
+          done({ ok: ev.ok !== false, data: ev.data });
         }
       } catch { /* ignore parse errors */ }
     });
     sock.on("error", () => { clearTimeout(timer); done(null); });
   });
+}
+
+/** Round trip returning just the payload (internal callers). Null = transport failure. */
+export async function request<T>(d: Daemon, msg: object): Promise<T | null> {
+  const env = await requestEnvelope(d, msg);
+  return env ? (env.data as T) : null;
 }
 
 /** How to run the bundled daemon binary on this platform. */
