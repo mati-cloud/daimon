@@ -151,7 +151,11 @@ export function Composer({
     setActive(0);
     if (items.length === 0) { setOpen(false); }
     // Auto-open only for non-filesystem completions (flags, subcommands, commands)
-    else if (!dismissed.current && items.length >= 2 && items.every(i => i.kind !== "file" && i.kind !== "dir")) setOpen(true);
+    // When all items are history, require trailing space — prevents dropdown on a fully-typed command with no new argument started
+    else if (!dismissed.current && items.length >= 2 && items.every(i => i.kind !== "file" && i.kind !== "dir")) {
+      const allHistory = items.every(i => i.kind === "history");
+      if (!allHistory || value.endsWith(" ")) setOpen(true);
+    }
   }, [items]);
 
   const [interactive, setInteractive] = useState(false);
