@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.3](https://github.com/mati-cloud/daimon/compare/v0.14.2...v0.14.3) (2026-11-24)
+
+
+### Bug Fixes
+
+* **ui:** hide block-ring pseudo-element during capture ([f8bba36](https://github.com/mati-cloud/daimon/commit/f8bba361795648e95ceb94f186e7ebc5321a385d))
+* **ui:** prevent history dropdown on complete commands ([dbbc182](https://github.com/mati-cloud/daimon/commit/dbbc182d4256bb48a7ab222705fbf0812413db18))
+
 ## [0.14.2](https://github.com/mati-cloud/daimon/compare/v0.14.1...v0.14.2) (2026-11-23)
 
 
