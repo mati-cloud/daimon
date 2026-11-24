@@ -2260,6 +2260,7 @@ function VirtualHtmlLines({ html, htmlLines }: { html: string; htmlLines?: strin
             data-index={vrow.index}
             ref={rowVirtualizer.measureElement}
             style={{ position: "absolute", top: 0, transform: `translateY(${vrow.start}px)`, width: "100%", minHeight: 24 }}
+            className="break-words"
             dangerouslySetInnerHTML={{ __html: lines[vrow.index] || " " }}
           />
         ))}
@@ -2420,7 +2421,7 @@ function VirtualLines({ visibleLines, toneClass, search, pm, currentMatch, match
           const line = visibleLines[vrow.index]!;
           return (
             <SelectableLine key={vrow.index} onSearch={onSearch ?? null}>
-              <div style={{ position: "absolute", top: vrow.start, width: "100%" }}>
+              <div ref={rowVirtualizer.measureElement} data-index={vrow.index} style={{ position: "absolute", top: vrow.start, width: "100%" }} className="break-words">
                 {search
                   ? highlightWithCurrent(pm ? line.replace(SECRET_RE, "[redacted by daimon]") : line, search, matchOffsets?.[vrow.index] ?? 0, currentMatch ?? -1)
                   : (pm ? redactNode(line) : (linkifyAll(line, onPathClick) || " "))}
