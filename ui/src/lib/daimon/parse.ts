@@ -644,6 +644,8 @@ export function tableHeader(firstLine: string): { starts: number[]; names: strin
   if (firstLine.trimStart() !== firstLine || firstLine.trimEnd().endsWith(":")) return null;
   // Skip curl verbose / HTTP header lines: * info, > request, < response
   if (/^[*><]\s/.test(firstLine)) return null;
+  // Skip key-value label lines: first token ends with ":" (e.g. "Path:   foo")
+  if (/^\S+:\s/.test(firstLine)) return null;
   const starts: number[] = [];
   const names: string[] = [];
   // Runs of non-space chars separated by 2+ spaces give the column positions
