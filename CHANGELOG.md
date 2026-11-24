@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.4](https://github.com/mati-cloud/daimon/compare/v0.14.3...v0.14.4) (2026-11-24)
+
+
+### Bug Fixes
+
+* **ui:** skip key-value label lines in table detection ([5111a99](https://github.com/mati-cloud/daimon/commit/5111a9928bb6fd34dfe61973ff4c5096ea249097))
+
 ## [0.14.3](https://github.com/mati-cloud/daimon/compare/v0.14.2...v0.14.3) (2026-11-24)
 
 
