@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.6](https://github.com/mati-cloud/daimon/compare/v0.14.5...v0.14.6) (2026-11-25)
+
+
+### Bug Fixes
+
+* **ui:** redact command input in presentation mode and improve line wrapping ([94ba8b0](https://github.com/mati-cloud/daimon/commit/94ba8b0ec2991a6c3d1fe2b3ba07471c85bfdd42))
+
 ## [0.14.5](https://github.com/mati-cloud/daimon/compare/v0.14.4...v0.14.5) (2026-11-25)
 
 
