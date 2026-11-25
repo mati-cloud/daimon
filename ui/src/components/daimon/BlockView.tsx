@@ -3011,12 +3011,12 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
             : <div className="size-2 rounded-full ring-4 ring-background bg-signal" />
         }
       </div>
-      <header className="flex flex-wrap items-center gap-x-3">
-        <span className="font-mono text-[13px] text-muted-foreground">{displayPath(block.cwd)}</span>
+      <header className="flex flex-nowrap items-center gap-x-3 min-w-0">
+        <span className="shrink-0 font-mono text-[13px] text-muted-foreground">{displayPath(block.cwd)}</span>
         <button
           onClick={() => onRerun(block.input)}
-          className={`min-w-0 break-all whitespace-pre-wrap text-left font-mono text-[14px] font-medium underline-offset-4 hover:underline ${failed ? "text-alarm" : "text-foreground"}`}
-          title="Run again"
+          className={`min-w-0 truncate text-left font-mono text-[14px] font-medium underline-offset-4 hover:underline ${failed ? "text-alarm" : "text-foreground"}`}
+          title={block.input}
         >
           {pm ? redactNode(block.input) : block.input}
         </button>
@@ -3024,7 +3024,7 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
           <button
             onClick={() => { sendRaw(sessionId, "\x03"); setTimeout(() => abandonRun(sessionId), 2000); }}
             title="Cancel (Ctrl-C)"
-            className="ml-1 flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] text-alarm/80 hover:bg-alarm/10 hover:text-alarm transition-colors"
+            className="ml-1 shrink-0 flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] text-alarm/80 hover:bg-alarm/10 hover:text-alarm transition-colors"
           >
             <XIcon className="size-3" />
             <span>cancel</span>
@@ -3033,12 +3033,12 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
         {activityProbe && (
           <button
             onClick={() => setProbeOpen(o => !o)}
-            className="ml-1 flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground/70 hover:bg-muted/40 hover:text-muted-foreground transition-colors"
+            className="ml-1 shrink-0 flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground/70 hover:bg-muted/40 hover:text-muted-foreground transition-colors"
           >
             {activityProbe.netConnections.length > 0 ? "⟳ network" : activityProbe.processes.some(p => (p.cpuPct ?? 0) > 0.5) ? `⟳ cpu ${activityProbe.processes.reduce((s, p) => s + (p.cpuPct ?? 0), 0).toFixed(0)}%` : `⚠ quiet ${Math.round(activityProbe.quietMs / 1000)}s`}
           </button>
         )}
-        <span className="ml-auto flex items-center gap-3">
+        <span className="ml-auto shrink-0 flex items-center gap-3">
           {isPinned && <PinIcon className="size-3 text-signal/70" aria-label="pinned" />}
           <BlockModeHints open={modeActive} collapsible={isLong ? (expanded ? "collapse" : "expand") : null} />
           <BlockMeta block={block} />
