@@ -1,6 +1,6 @@
 {
   "name": "daimon2",
-  "version": "0.14.4",
+  "version": "0.14.5",
   "scripts": {
     "start": "electrobun run",
     "dev": "electrobun dev",

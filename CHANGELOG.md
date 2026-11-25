@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.5](https://github.com/mati-cloud/daimon/compare/v0.14.4...v0.14.5) (2026-11-25)
+
+
+### Bug Fixes
+
+* **ui:** add word-break styling to virtual lines ([380ca48](https://github.com/mati-cloud/daimon/commit/380ca480ec735d2d5ccfb9079856f4c029d93797))
+
 ## [0.14.4](https://github.com/mati-cloud/daimon/compare/v0.14.3...v0.14.4) (2026-11-24)
 
 
