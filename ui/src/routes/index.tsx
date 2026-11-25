@@ -1244,7 +1244,7 @@ function Daimon() {
     // If the command contains shell compound constructs (for/while/if/case/heredoc), send whole.
     const lines = cmd.split(/(?<!\\)\n/).filter((l) => l.trim());
     if (lines.length > 1) {
-      const isCompound = /^\s*(for|while|until|if|case|select)\b|<<[-']?\w|\bdo\b|\bdone\b|\bfi\b|\besac\b/.test(cmd);
+      const isCompound = /^\s*(for|while|until|if|case|select)\b|<<[-']?\w|\bdo\b|\bdone\b|\bfi\b|\besac\b/.test(cmd) || /\\\n/.test(cmd);
       if (isCompound) {
         await runBlock(sessionId, cmd, sess.state, undefined, secret);
         return;
@@ -1564,7 +1564,7 @@ function Daimon() {
   );
 
   return (
-    <PresentationModeContext.Provider value={presentationMode || captureReq !== null}>
+    <PresentationModeContext.Provider value={presentationMode}>
      <CaptureModeContext.Provider value={captureReq !== null}>
     <div
       className="flex flex-col h-screen bg-transparent text-foreground overflow-hidden"
@@ -1820,17 +1820,16 @@ function Daimon() {
             {/* The command of the block scrolled out above the viewport, sticky like a section
                 heading: click to scroll back to its start. */}
             <div className={`no-drag grid min-w-0 transition-[grid-template-rows,opacity] duration-200 ${headerBlock ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}>
-              <div className="flex min-w-0 items-center gap-3 overflow-hidden">
+              <div className="flex min-w-0 min-h-0 items-center gap-3 overflow-hidden">
                 {displayHeaderBlock && (<>
                   <button
-                    key={displayHeaderBlock.id}
                     onClick={() => blockRefsMap.current.get(displayHeaderBlock.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
                     title={displayHeaderBlock.input}
-                    className={`min-w-0 truncate font-mono text-[12px] underline-offset-4 hover:underline animate-in fade-in duration-150 ${!displayHeaderBlock.pending && displayHeaderBlock.code !== 0 ? "text-alarm" : "text-muted-foreground"}`}
+                    className={`min-w-0 truncate font-mono text-[12px] underline-offset-4 hover:underline ${!displayHeaderBlock.pending && displayHeaderBlock.code !== 0 ? "text-alarm" : "text-muted-foreground"}`}
                   >
                     {displayHeaderBlock.input}
                   </button>
-                  <BlockMeta block={displayHeaderBlock} className="shrink-0 animate-in fade-in duration-150" />
+                  <BlockMeta block={displayHeaderBlock} className="shrink-0" />
                 </>)}
               </div>
             </div>

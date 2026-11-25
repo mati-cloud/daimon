@@ -2805,6 +2805,7 @@ function LinkCard({ p }: { p: LinkPreview }) {
 }
 
 function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected = false, onPinToggle, onRerun, isLast, currentCtx = "", sessionId = "", isTuiActive = false, promptingForInput = false, onSearch, onPathClick }: { block: Block; modeActive?: boolean; isPinned?: boolean; isSelected?: boolean; onPinToggle?: (id: string) => void; onRerun: (cmd: string) => void; isLast?: boolean; currentCtx?: string; sessionId?: string; isTuiActive?: boolean; promptingForInput?: boolean; onSearch?: ((q: string) => void) | null; onPathClick?: (path: string) => void }) {
+  const pm = useContext(PresentationModeContext);
   const ok = block.code === 0;
   const failed = !block.pending && !ok;
   const [expanded, setExpandedRaw] = useState(true);
@@ -3014,10 +3015,10 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
         <span className="font-mono text-[13px] text-muted-foreground">{displayPath(block.cwd)}</span>
         <button
           onClick={() => onRerun(block.input)}
-          className={`min-w-0 break-all text-left font-mono text-[14px] font-medium underline-offset-4 hover:underline ${failed ? "text-alarm" : "text-foreground"}`}
+          className={`min-w-0 break-all whitespace-pre-wrap text-left font-mono text-[14px] font-medium underline-offset-4 hover:underline ${failed ? "text-alarm" : "text-foreground"}`}
           title="Run again"
         >
-          {block.input}
+          {pm ? redactNode(block.input) : block.input}
         </button>
         {block.pending && (
           <button
