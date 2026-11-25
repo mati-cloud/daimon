@@ -27,7 +27,7 @@ export default {
   app: {
     name: "daimon2",
     identifier: "daimon2.terminal",
-    version: "0.14.6", // x-release-please-version
+    version: "0.14.7", // x-release-please-version
   },
   build: {
     // Windows: run the main process on Bun. Electrobun's default runtime (Cottontail)

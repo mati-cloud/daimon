@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.7](https://github.com/mati-cloud/daimon/compare/v0.14.6...v0.14.7) (2026-11-25)
+
+
+### Bug Fixes
+
+* **ui:** improve header layout to prevent command input overflow ([f1318ed](https://github.com/mati-cloud/daimon/commit/f1318ed616505edf4839f335d18fb6bfcfe9234f))
+
 ## [0.14.6](https://github.com/mati-cloud/daimon/compare/v0.14.5...v0.14.6) (2026-11-25)
 
 
