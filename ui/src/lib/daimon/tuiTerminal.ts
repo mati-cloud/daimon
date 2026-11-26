@@ -1,17 +1,24 @@
 // The terminal for full-screen programs (vim, btop, less…) inside a block.
 //
-// Always Wraith: libghostty-vt + a WebGPU renderer in a worker. WebGPU is required;
-// there is no xterm fallback. If Wraith.mount() rejects, the error surfaces in the block
-// (BlockView catches it) so it is visible rather than silently degrading to a black xterm.
+// Two engines:
+//   - Wraith (libghostty-vt + WebGPU in a worker): used for true fullscreen
+//     alt-screen apps (vim, btop, htop). Requires WebGPU; a solid opaque canvas
+//     is correct for full-pane use.
+//   - Headless (libghostty-vt parser, no GPU): used for inline interactive menus
+//     (hammer, inquirer, fzf non-fullscreen). Runs on the main thread; feeds a
+//     Uint32Array grid to TuiGrid.tsx for native DOM rendering — native selection,
+//     transparent cell backgrounds, zero foreign DOM layer.
 
 import { toast } from "sonner";
 import { Wraith } from "wraithterm";
+import { mountHeadless } from "./headlessTerminal";
+export type { GridSnapshot } from "./headlessTerminal";
 import { magnifyScale } from "./magnify";
 
 type Disposable = { dispose(): void };
 
 export interface TuiTerminal {
-  readonly kind: "wraith";
+  readonly kind: "wraith" | "headless";
   readonly cols: number;
   readonly rows: number;
   write(data: string): Promise<void>;
@@ -42,13 +49,22 @@ export const TUI_ATTR = "data-tui";
 /** Whether a key/mouse event happened inside a full-screen program's terminal. */
 export const inTerminal = (e: Event) => !!(e.target as Element | null)?.closest?.(`[${TUI_ATTR}]`);
 
-export async function mountTui(el: HTMLElement, opts: TuiOptions): Promise<TuiTerminal> {
+export async function mountTui(
+  el: HTMLElement,
+  opts: TuiOptions,
+  engine: "wraith" | "headless",
+  onGrid?: (snap: GridSnapshot) => void,
+): Promise<TuiTerminal> {
   el.setAttribute(TUI_ATTR, "");
   const rect = el.getBoundingClientRect();
-  console.info(`[tui] mount — size ${rect.width}×${rect.height}, WebGPU=${("gpu" in navigator) && window.isSecureContext}, secure=${window.isSecureContext}`);
+  if (engine === "headless") {
+    console.info(`[tui] mount headless — size ${rect.width}×${rect.height}`);
+    return mountHeadless(el, opts, onGrid!);
+  }
+  console.info(`[tui] mount wraith — size ${rect.width}×${rect.height}, WebGPU=${("gpu" in navigator) && window.isSecureContext}, secure=${window.isSecureContext}`);
   if (!("gpu" in navigator) || !window.isSecureContext) {
-    console.error("[tui] WebGPU unavailable — no xterm fallback, terminal will not start", { gpu: "gpu" in navigator, secure: window.isSecureContext });
-    throw new Error("WebGPU required (no fallback): gpu=" + ("gpu" in navigator) + " secure=" + window.isSecureContext);
+    console.error("[tui] WebGPU unavailable — terminal will not start", { gpu: "gpu" in navigator, secure: window.isSecureContext });
+    throw new Error("WebGPU required: gpu=" + ("gpu" in navigator) + " secure=" + window.isSecureContext);
   }
   return mountWraith(el, opts);
 }

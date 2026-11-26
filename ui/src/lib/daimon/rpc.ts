@@ -111,10 +111,16 @@ const pendingRequests = new Map<string, { resolve: (v: unknown) => void; reject:
 // via a "daimon:rpc-reply" CustomEvent.
 
 function hostSend(payload: object): void {
-  (window as { __electrobunSendToHost?: (m: unknown) => void }).__electrobunSendToHost?.(
-    { type: "daemon-rpc", req_id: undefined, payload }
-  );
+  const ipc = (window as { __electrobunSendToHost?: (m: unknown) => void }).__electrobunSendToHost;
+  if (ipc) {
+    ipc({ type: "daemon-rpc", req_id: undefined, payload });
+  } else if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(payload));
+  }
 }
+
+// Messages queued before WS connected; flushed in ws.onopen.
+const wsQueue: string[] = [];
 
 function request<T>(msg: object, timeoutMs = 5000): Promise<T> {
   const req_id = `r${++reqSeq}`;
@@ -127,9 +133,17 @@ function request<T>(msg: object, timeoutMs = 5000): Promise<T> {
       resolve: (v) => { clearTimeout(timer); resolve(v as T); },
       reject:  (e) => { clearTimeout(timer); reject(e); },
     });
-    (window as { __electrobunSendToHost?: (m: unknown) => void }).__electrobunSendToHost?.(
-      { type: "daemon-rpc", req_id, payload: { ...msg, host_timeout_ms: timeoutMs } }
-    );
+    const ipc = (window as { __electrobunSendToHost?: (m: unknown) => void }).__electrobunSendToHost;
+    if (ipc) {
+      ipc({ type: "daemon-rpc", req_id, payload: { ...msg, host_timeout_ms: timeoutMs } });
+    } else {
+      const frame = JSON.stringify({ ...msg, req_id });
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(frame);
+      } else {
+        wsQueue.push(frame);
+      }
+    }
   });
 }
 
@@ -169,12 +183,15 @@ async function connect() {
   }
   ws = new WebSocket(`ws://localhost:${daemonPort}/ws`);
   ws.onopen = () => {
+    // Flush any requests that queued up before WS was open.
+    while (wsQueue.length) ws!.send(wsQueue.shift()!);
     // Events sent while we were away are gone: let the UI resync its sessions.
     if (everConnected) reconnectListeners.forEach((fn) => fn());
     everConnected = true;
   };
   ws.onclose = () => {
     ws = null;
+    wsQueue.length = 0;
     // Reject all pending requests so callers don't hang across reconnect
     for (const [, p] of pendingRequests) p.reject(new Error("disconnected"));
     pendingRequests.clear();
@@ -216,8 +233,17 @@ async function connect() {
       latestProbe.set(ev.tab_id, probe);
       probeSubscribers.forEach((fn) => fn());
       activityProbeListeners.forEach((fn) => fn(probe));
+    } else if (ev.type === "response") {
+      const p = pendingRequests.get(ev.req_id);
+      if (p) {
+        pendingRequests.delete(ev.req_id);
+        if (ev.ok) p.resolve(ev.data);
+        else {
+          const d = ev.data as { error?: unknown } | null;
+          p.reject(new Error(typeof d?.error === "string" ? d.error : ev.data == null ? "daemon unreachable" : String(ev.data)));
+        }
+      }
     }
-    // Note: "response" events no longer arrive on the TCP WS — commands go via host IPC.
   };
 }
 void connect();

@@ -107,6 +107,6 @@ fn main() -> Result<()> {
                 tracing::error!("[unix] serve error: {e}");
             }
         });
-        ws::serve(listener, db, port, event_tx, event_rx).await
+        ws::serve(listener, db, event_tx, event_rx, mgr, port).await
     })
 }

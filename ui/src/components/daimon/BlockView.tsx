@@ -11,7 +11,8 @@ import { displayPath } from "@/lib/daimon/world";
 import { shell, getLatestProbe, subscribeProbe, type ActivityProbe, type ProbeProcess } from "@/lib/daimon/rpc";
 import { sendRaw, resizePty, getTuiReplayBuffer, getAltScreen, onAltScreenChange, takeRedraw, STREAMING_INTERACTIVE_RE, abandonRun, looksLikeYaml, splitHtmlLines } from "@/lib/daimon/shell";
 import type { Block, Out, LsEntry, GitStatusFile, GitBranchNode, GitLogRef } from "@/lib/daimon/shell";
-import { inTerminal, mountTui, writeClipboard, type TuiTerminal } from "@/lib/daimon/tuiTerminal";
+import { inTerminal, mountTui, writeClipboard, type TuiTerminal, type GridSnapshot } from "@/lib/daimon/tuiTerminal";
+import { TuiGrid } from "./TuiGrid";
 import { applySpec, useSpecsVersion } from "@/lib/daimon/specs";
 import hljs from "highlight.js/lib/core";
 import hljsBash from "highlight.js/lib/languages/bash";
@@ -2718,15 +2719,19 @@ const COLLAPSED_MAX_PX = 320;
 
 /** Terminal background resolved from CSS --background at call time (theme-aware). Returns #rrggbb. */
 function tuiBg(): string {
+  // getComputedStyle returns oklch(...) in Tailwind 4; canvas converts any CSS color to sRGB.
   const el = document.createElement("div");
   el.style.cssText = "position:fixed;visibility:hidden;background-color:var(--background)";
   document.body.appendChild(el);
   const color = getComputedStyle(el).backgroundColor;
   document.body.removeChild(el);
-  // Wraith requires #rrggbb; computed style returns rgb(...) — convert it.
-  const m = color.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
-  if (m) return "#" + [m[1], m[2], m[3]].map((n) => parseInt(n).toString(16).padStart(2, "0")).join("");
-  return color.startsWith("#") ? color : "#0d1117";
+  const c = document.createElement("canvas");
+  c.width = c.height = 1;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, 1, 1);
+  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+  return "#" + [r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("");
 }
 
 /** Plain text of the outputs that can carry URLs (raw lines and ANSI html, tags and entities dropped). */
@@ -2870,6 +2875,20 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
 
   // Inline TUI: the terminal is mounted directly in this block's div
   const inlineTuiRef = useRef<HTMLDivElement>(null);
+  // Track PTY rows to size the container to fit content (non-fullscreen menus).
+  // Start small so the container is not 24-row empty on mount; Wraith will
+  // onResize to whatever rows it actually needs once it fills the container.
+  const [tuiRows, setTuiRows] = useState(24);
+  // Capture card background once so the container matches even outside the canvas.
+  const tuiBgColor = useMemo(() => isTuiActive ? tuiBg() : undefined, [isTuiActive]);
+  // Grid snapshot from the headless renderer — drives TuiGrid for inline TUI.
+  const [tuiGrid, setTuiGrid] = useState<GridSnapshot | null>(null);
+  // Latches true once TuiGrid has had a non-space cell; never resets to false (prevents OutView
+  // from flashing back during screen-clear transitions between TUI program states).
+  const tuiGridHasContentRef = useRef(false);
+  if (tuiGrid && tuiGrid.cells.some((v, i) => i % 4 === 0 && v !== 0)) tuiGridHasContentRef.current = true;
+  if (!isTuiActive) tuiGridHasContentRef.current = false;
+  const tuiGridHasContent = tuiGridHasContentRef.current;
   // Seed from map in case altScreenEnter already fired before this component mounted
   const [tuiFullscreen, setTuiFullscreen] = useState(() => getAltScreen(sessionId));
   const tuiFitRef = useRef<(() => void) | null>(null);
@@ -2906,9 +2925,9 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
   useEffect(() => {
     if (!isTuiActive || !inlineTuiRef.current) return;
     const el = inlineTuiRef.current;
-    // Wraith (libghostty-vt + WebGPU in a worker) where WebGPU exists, else xterm's DOM
-    // renderer (Linux's WebKitGTK has no WebGPU) — see tuiTerminal.ts. Either fits itself
-    // to the host and keeps scrollback inside its viewport.
+    // Wraith (libghostty-vt + WebGPU in a worker) for true fullscreen alt-screen apps;
+    // Headless (libghostty-vt parser, no GPU) for inline menus — React DOM renderer,
+    // native browser selection, transparent cell backgrounds, no foreign DOM layer.
     let disposed = false;
     let term: TuiTerminal | null = null;
     // Bytes that arrive while the engine is still mounting: the replay buffer first,
@@ -2931,19 +2950,19 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
       scrollback: 10000,
       theme: {
         foreground: "#e6edf3",
-        background: tuiBg(),
+        background: tuiBgColor ?? tuiBg(),
         cursor: "#58a6ff",
         palette: [
           "#484f58", "#ff7b72", "#3fb950", "#d29922", "#58a6ff", "#bc8cff", "#39c5cf", "#b1bac4",
           "#6e7681", "#ffa198", "#56d364", "#e3b341", "#79c0ff", "#d2a8ff", "#56d4dd", "#f0f6fc",
         ],
       },
-    }).then((t) => {
+    }, tuiFullscreen ? "wraith" : "headless", tuiFullscreen ? undefined : setTuiGrid).then((t) => {
       if (disposed) { void t.dispose(); return; }
       term = t;
       subs.push(
         t.onData((data) => sendRaw(sessionId, data)),
-        t.onResize(({ cols, rows }) => resizePty(sessionId, cols, rows)),
+        t.onResize(({ cols, rows }) => { resizePty(sessionId, cols, rows); setTuiRows(rows); }),
         t.onError((err) => console.error("[tui]", err)),
         // Straight from the terminal engine: the sidebar shows them (routes/index.tsx).
         t.onTitleChange((title) => window.dispatchEvent(new CustomEvent("tui-title", { detail: { sid: sessionId, title } }))),
@@ -3118,22 +3137,37 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
           </button>
         </div>
       )}
-      {/* Inline TUI: terminal mounted directly here for alt-screen apps (vim, htop, fzf).
-          Inline it is a fixed-height viewport with its own scrollback. */}
+      {/* Inline TUI: terminal mounted directly here for alt-screen apps (vim, htop, fzf)
+          and interactive menus (hammer, inquirer). Container height tracks actual PTY rows
+          so menus don't leave a huge empty canvas below their content.
+          Inline path uses Headless WASM + TuiGrid React DOM renderer — native selection,
+          dark terminal background so libghostty's default palette renders correctly. */}
       {isTuiActive && (
         <div
           ref={inlineTuiRef}
           className={tuiFullscreen
             ? "tui-fullscreen absolute inset-0 z-50"
-            : "mt-2.5 h-[min(24rem,60vh)] overflow-hidden rounded"}
-          style={{ minHeight: 0, background: tuiBg() }}
+            : "mt-2.5 overflow-hidden rounded"}
+          style={tuiFullscreen
+            ? { minHeight: 0, backgroundColor: tuiBgColor }
+            : { minHeight: tuiGrid ? 0 : `${tuiRows * 13 * 1.5}px`, color: "var(--foreground)", padding: "6px 8px" }}
           onPointerUp={() => {
             const ta = inlineTuiRef.current?.querySelector<HTMLElement>("textarea");
             ta?.focus({ preventScroll: true });
           }}
-        />
+        >
+          {!tuiFullscreen && tuiGrid && (
+            <TuiGrid
+              snap={tuiGrid}
+              focused={document.activeElement === inlineTuiRef.current?.querySelector("textarea")}
+            />
+          )}
+          {!tuiFullscreen && !tuiGrid && (
+            <span className="font-mono text-[13px] text-muted-foreground/50 animate-pulse">loading terminal…</span>
+          )}
+        </div>
       )}
-      {!isTuiActive && block.out.length > 0 && (
+      {(!isTuiActive || !tuiGridHasContent) && block.out.length > 0 && (
         <div className="relative mt-2.5">
           <div
             ref={outputRef}
@@ -3159,7 +3193,7 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
           )}
         </div>
       )}
-      {!isTuiActive && !block.pending && block.out.length > 0 && <LinkPreviews out={block.out} />}
+      {(!isTuiActive || !tuiGridHasContent) && !block.pending && block.out.length > 0 && <LinkPreviews out={block.out} />}
     </article>
   );
 }

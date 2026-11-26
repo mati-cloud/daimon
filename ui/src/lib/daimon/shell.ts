@@ -41,9 +41,10 @@ export const STREAMING_INTERACTIVE_RE = /^\s*(ssh\b|sftp\b|mosh\b|nc\s+|ncat\s+|
 const INTERACTIVE_RE = /^\s*(scp|ipmitool|ipmi|kubectl\s+(exec|attach|debug)|oc\s+(exec|attach)|docker\s+(exec|run\s+-it?)|podman\s+(exec|run\s+-it?)|sudo\s+(-[siSI]\s+)?(-u\s+\S+\s+)?(-[siSI]\s+)?(su|bash|zsh|sh|fish)\b|su\s+|bash\s+-i|zsh\s+-i|python\s+-c|python3\s+-c)/;
 
 // Sequences unambiguously from a full-screen TUI, safe to trigger on a single chunk:
-// alt-screen enter/exit (\x1b[?1049h/l) and mouse tracking (\x1b[?1000h).
-// Every modern TUI framework (ncurses, crossterm, ratatui, bubbletea, ink) uses alt-screen.
-const TUI_ALTMOUSE_RE = /\x1b\[\?1000h|\x1b\[\?1049[lh]/;
+// alt-screen (\x1b[?1049h/l), mouse tracking (\x1b[?1000h), hide-cursor (\x1b[?25l).
+// Hide-cursor is emitted by interactive menus (inquirer, bubbletea, charm) that don't use
+// alt-screen but do need keyboard input — never by progress-bar / status-line tools.
+const TUI_ALTMOUSE_RE = /\x1b\[\?1000h|\x1b\[\?1049[lh]|\x1b\[\?25l/;
 
 // Weaker signals — require BOTH cursor-home AND erase-display to have appeared in the
 // accumulated output before triggering (each alone appears in progress-bar tools).
@@ -51,6 +52,8 @@ const TUI_ALTMOUSE_RE = /\x1b\[\?1000h|\x1b\[\?1049[lh]/;
 // keystrokes; the outer shell only re-enables it after its own prompt marker.
 const TUI_HOME_RE  = /\x1b\[(\d*;\d*H|H\b)/;
 const TUI_ERASE_RE = /\x1b\[2J|\x1b\[3J/;
+// clintermission exits inline TUI by showing the cursor — use as re-enable signal.
+const TUI_SHOW_CURSOR_RE = /\x1b\[\?25h/;
 
 // Terminal state changes that mean nothing in a text block: private mode set/reset,
 // cursor save/restore (ESC 7 / ESC 8) and scroll-region set/reset (CSI r). Full-screen
@@ -492,6 +495,7 @@ export async function run(
   const id = Math.random().toString(36).slice(2);
 
   let detectedTUI = false;
+  let tuiLive = false;
   // The command's output as sent (up to RAW_KEEP chars), and whether it ever took over the
   // screen: output that only moves the cursor about (fastfetch, progress bars) is shown in the
   // inline terminal while it runs, then becomes the block's output as that screen ended up.
@@ -602,6 +606,7 @@ export async function run(
     if (resumedAlt) { notifyAltScreen(tabId, true); redrawPending.add(tabId); }
     if (resumedAlt || TUI_ALTMOUSE_RE.test(resume.output) || (TUI_HOME_RE.test(resume.output) && TUI_ERASE_RE.test(resume.output))) {
       detectedTUI = true;
+      tuiLive = true;
       notifyTui(tabId, true);
     } else if (resume.output) {
       appendOutput(resume.output.replace(PTY_STATE_RE, ""));
@@ -653,12 +658,14 @@ export async function run(
         && TUI_HOME_RE.test(accumulated) && TUI_ERASE_RE.test(accumulated);
       if (!detectedTUI && !recentInterrupt && (TUI_ALTMOUSE_RE.test(data) || weakTui)) {
         detectedTUI = true;
+        tuiLive = true;
         // Keep normalBuf — logs before the TUI/spinner phase are valid output to preserve
         notifyTui(tabId, true);
-        return;
+        // fall through — continue feeding the parser so Block output stays live during TUI
       }
-      if (detectedTUI) return;
-      appendOutput(cleanData);
+      // Inline TUI (clintermission) exits by showing the cursor — resume plain output after.
+      if (tuiLive && TUI_SHOW_CURSOR_RE.test(data)) tuiLive = false;
+      if (!tuiLive) appendOutput(cleanData);
     });
 
     globalExitOff = shell.onExit((tid, code) => {
@@ -761,15 +768,12 @@ export async function run(
       // the command is done the moment its output is, as in any terminal. A short output's
       // live view is the whole output: finish with the parser's final result directly.
       perf.finalAskAt = performance.now();
-      // Cursor-moving output that never went full screen: the block shows the screen it drew.
-      const screen = detectedTUI && !sawAltScreen && !isInteractive && !resumedAlt && rawRun !== null
-        ? screenOutput(effectiveInput, rawRun)
-        : null;
-      // `latest` before `final`: the worker answers in order, and `final` ends the command there.
-      const liveNow = screen ? null : parser.latest(LIVE_WINDOW);
+      // Cursor-moving inline TUI: previously used screenOutput() since the parser was
+      // starved. Now the parser receives all output during TUI (see onOutput above), so
+      // screenOutput is no longer needed; use parser.final() on all paths.
+      const liveNow = parser.latest(LIVE_WINDOW);
       const complete = parser.final();
-      if (screen) void complete.then(() => finish(screen, undefined, false));
-      else void liveNow!.then(({ out: live, partial }) => (partial ? finish(live, complete) : complete.then((out) => finish(out))));
+      void liveNow!.then(({ out: live, partial }) => (partial ? finish(live, complete) : complete.then((out) => finish(out))));
       const finish = (out: Out[], later?: Promise<Out[]>, fromParser = true) => {
         perf.finalGotAt = performance.now();
         const gb = finalCtx?.gitBranch ?? state.gitBranch;
