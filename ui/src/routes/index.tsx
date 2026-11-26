@@ -1811,7 +1811,7 @@ function Daimon() {
             <PanelLeftIcon className="size-4" />
           </button>
 
-          <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="no-drag flex items-center gap-2 font-mono text-[13px] text-foreground">
               {active.state.cwd[active.state.cwd.length - 1] ?? "~"}
               {gitBranch && <span className="text-muted-foreground/60">{gitBranch}</span>}

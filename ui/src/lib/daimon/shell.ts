@@ -37,24 +37,20 @@ export const STREAMING_INTERACTIVE_RE = /^\s*(ssh\b|sftp\b|mosh\b|nc\s+|ncat\s+|
 
 // Commands that need the inline terminal (alt-screen TUI).
 // Only list commands where we MUST route before any output (interactive shells, exec/attach).
-// All other TUI apps (vim, k9s, claude, htop, etc.) are auto-detected via TUI_RE on first output.
+// All other TUI apps (vim, k9s, claude, htop, etc.) are auto-detected via TUI_ALTMOUSE_RE / TUI_HOME_RE+TUI_ERASE_RE on first output.
 const INTERACTIVE_RE = /^\s*(scp|ipmitool|ipmi|kubectl\s+(exec|attach|debug)|oc\s+(exec|attach)|docker\s+(exec|run\s+-it?)|podman\s+(exec|run\s+-it?)|sudo\s+(-[siSI]\s+)?(-u\s+\S+\s+)?(-[siSI]\s+)?(su|bash|zsh|sh|fish)\b|su\s+|bash\s+-i|zsh\s+-i|python\s+-c|python3\s+-c)/;
 
-// TUI sequences that signal an interactive program.
-// Covers: cursor-up redraws, hide/show cursor (spinners/menus),
-// cursor-absolute-position (full-screen apps: k9s, lazygit, etc emit \x1b[H or \x1b[r;cH),
-// erase-display (\x1b[2J / \x1b[3J), enable mouse tracking (\x1b[?1000h).
-// Bracketed paste on (\x1b[?2004h): a line editor is waiting at a prompt inside the command:
-// a nested shell (bash/zsh/fish, also over SSH) or a readline REPL (python, psql, irb).
-// The outer shell turns it off before running a command and back on only after its own
-// prompt marker, so mid-command it can only come from a program wanting keystrokes.
-// Not erase-line (\x1b[2K): on its own that's a one-line progress redraw (vite, npm),
-// which normalizeTerminal replays in the block.
-const TUI_RE = /\x1b\[\d*A|\x1b\[\d*;\d*H|\x1b\[H\b|\x1b\[2J|\x1b\[3J|\x1b\[\?1000h|\x1b\[\?1049[lh]/;
-// Sequences unambiguously from a TUI program even with no prior output.
-// ?1049h/l = alt-screen, ?1000h = mouse tracking — prompt themes never emit these.
-// ?2004h = bracketed-paste: zsh re-enables it on every prompt redraw, so excluded.
+// Sequences unambiguously from a full-screen TUI, safe to trigger on a single chunk:
+// alt-screen enter/exit (\x1b[?1049h/l) and mouse tracking (\x1b[?1000h).
+// Every modern TUI framework (ncurses, crossterm, ratatui, bubbletea, ink) uses alt-screen.
 const TUI_ALTMOUSE_RE = /\x1b\[\?1000h|\x1b\[\?1049[lh]/;
+
+// Weaker signals — require BOTH cursor-home AND erase-display to have appeared in the
+// accumulated output before triggering (each alone appears in progress-bar tools).
+// Bracketed paste (\x1b[?2004h) mid-command means a nested shell or readline REPL wants
+// keystrokes; the outer shell only re-enables it after its own prompt marker.
+const TUI_HOME_RE  = /\x1b\[(\d*;\d*H|H\b)/;
+const TUI_ERASE_RE = /\x1b\[2J|\x1b\[3J/;
 
 // Terminal state changes that mean nothing in a text block: private mode set/reset,
 // cursor save/restore (ESC 7 / ESC 8) and scroll-region set/reset (CSI r). Full-screen
@@ -604,7 +600,7 @@ export async function run(
   if (resume) {
     appendReplay(tabId, resume.output);
     if (resumedAlt) { notifyAltScreen(tabId, true); redrawPending.add(tabId); }
-    if (resumedAlt || TUI_RE.test(resume.output)) {
+    if (resumedAlt || TUI_ALTMOUSE_RE.test(resume.output) || (TUI_HOME_RE.test(resume.output) && TUI_ERASE_RE.test(resume.output))) {
       detectedTUI = true;
       notifyTui(tabId, true);
     } else if (resume.output) {
@@ -650,7 +646,12 @@ export async function run(
       // Auto-detect TUI: alt-screen/mouse-enable fire immediately (never from prompt themes);
       // all other sequences only count after some output exists. Also suppress for 1s after
       // Ctrl+C: zsh redraws prompt with cursor-pos/erase sequences that look like TUI startup.
-      if (!detectedTUI && !recentInterrupt && (TUI_ALTMOUSE_RE.test(data) || (TUI_RE.test(data) && rawRun !== null && rawRun.length > 0))) {
+      // Weak signals (cursor-home, erase-display) require BOTH to have appeared in the
+      // accumulated buffer — each alone is used by progress-bar tools (fastfetch, uv, nous).
+      const accumulated = rawRun ?? "";
+      const weakTui = rawRun !== null && rawRun.length > 0
+        && TUI_HOME_RE.test(accumulated) && TUI_ERASE_RE.test(accumulated);
+      if (!detectedTUI && !recentInterrupt && (TUI_ALTMOUSE_RE.test(data) || weakTui)) {
         detectedTUI = true;
         // Keep normalBuf — logs before the TUI/spinner phase are valid output to preserve
         notifyTui(tabId, true);

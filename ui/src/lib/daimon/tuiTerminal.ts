@@ -1,26 +1,17 @@
 // The terminal for full-screen programs (vim, btop, less…) inside a block.
 //
-// Where WebGPU exists (macOS's WKWebView, the Chromium bundled with the Linux app) it is
-// Wraith: libghostty-vt + a WebGPU renderer in a worker. Without WebGPU (no usable GPU
-// adapter, a webview without it such as WebKitGTK) Wraith.mount() rejects ("requires WebGPU
-// in a secure context"); then the same package's xterm.js-compatible Terminal takes over,
-// drawn on the GPU by xterm's official WebGL renderer — or by xterm's DOM renderer if WebGL
-// isn't available or its context is lost. All behind one small interface, so BlockView
-// doesn't care which one it got.
+// Always Wraith: libghostty-vt + a WebGPU renderer in a worker. WebGPU is required;
+// there is no xterm fallback. If Wraith.mount() rejects, the error surfaces in the block
+// (BlockView catches it) so it is visible rather than silently degrading to a black xterm.
 
 import { toast } from "sonner";
 import { Wraith } from "wraithterm";
-import { Terminal as XtermTerminal } from "wraithterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import { WebglAddon } from "@xterm/addon-webgl";
-import "wraithterm/css/xterm.css";
 import { magnifyScale } from "./magnify";
 
 type Disposable = { dispose(): void };
 
 export interface TuiTerminal {
-  /** "wraith" (WebGPU), "webgl" or "dom" (xterm) — for logs. */
-  readonly kind: "wraith" | "webgl" | "dom";
+  readonly kind: "wraith";
   readonly cols: number;
   readonly rows: number;
   write(data: string): Promise<void>;
@@ -53,16 +44,13 @@ export const inTerminal = (e: Event) => !!(e.target as Element | null)?.closest?
 
 export async function mountTui(el: HTMLElement, opts: TuiOptions): Promise<TuiTerminal> {
   el.setAttribute(TUI_ATTR, "");
-  let t: TuiTerminal | null = null;
-  if ("gpu" in navigator && window.isSecureContext) {
-    try {
-      t = await mountWraith(el, opts);
-    } catch (err) {
-      console.warn("[tui] WebGPU terminal unavailable, using xterm:", err);
-      el.replaceChildren(); // whatever a half-started mount left behind
-    }
+  const rect = el.getBoundingClientRect();
+  console.info(`[tui] mount — size ${rect.width}×${rect.height}, WebGPU=${("gpu" in navigator) && window.isSecureContext}, secure=${window.isSecureContext}`);
+  if (!("gpu" in navigator) || !window.isSecureContext) {
+    console.error("[tui] WebGPU unavailable — no xterm fallback, terminal will not start", { gpu: "gpu" in navigator, secure: window.isSecureContext });
+    throw new Error("WebGPU required (no fallback): gpu=" + ("gpu" in navigator) + " secure=" + window.isSecureContext);
   }
-  return t ?? mountXterm(el, opts);
+  return mountWraith(el, opts);
 }
 
 // ── Clipboard ────────────────────────────────────────────────────────────────
@@ -190,135 +178,4 @@ function sharpenOnMagnify(t: Wraith): () => void {
   window.addEventListener("daimon:magnify", onMagnify);
   if (magnifyScale() !== 1) apply(magnifyScale()); // mounted while the page is magnified
   return () => window.removeEventListener("daimon:magnify", onMagnify);
-}
-
-// ── xterm (WebGL, else DOM) ──────────────────────────────────────────────────
-
-const ANSI_NAMES = [
-  "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
-  "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite",
-] as const;
-
-function mountXterm(el: HTMLElement, opts: TuiOptions): TuiTerminal {
-  const ansi = Object.fromEntries(
-    ANSI_NAMES.flatMap((name, i) => (opts.theme.palette[i] ? [[name, opts.theme.palette[i]]] : [])),
-  ) as Partial<Record<(typeof ANSI_NAMES)[number], string>>;
-  const term = new XtermTerminal({
-    fontSize: opts.fontSize,
-    lineHeight: opts.lineHeight,
-    scrollback: opts.scrollback,
-    // The app's Geist Mono (a web font, already loaded for the UI); the WebGL renderer
-    // rasterizes it with the browser, so woff2 is fine here.
-    fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim() || "ui-monospace, monospace",
-    cursorBlink: true,
-    allowProposedApi: true,
-    theme: {
-      foreground: opts.theme.foreground,
-      background: opts.theme.background,
-      cursor: opts.theme.cursor,
-      ...ansi,
-    },
-  });
-  const fitAddon = new FitAddon();
-  term.loadAddon(fitAddon);
-  term.open(el);
-
-  // GPU rendering through WebGL; xterm's DOM renderer takes over if it can't start or its
-  // context is lost (GPU reset, too many contexts).
-  let kind: "webgl" | "dom" = "dom";
-  let webgl: WebglAddon | null = null;
-  const loadWebgl = () => {
-    webgl?.dispose();
-    webgl = null;
-    try {
-      const addon = new WebglAddon();
-      addon.onContextLoss(() => {
-        console.warn("[tui] WebGL context lost — using the DOM renderer");
-        addon.dispose();
-        if (webgl === addon) { webgl = null; kind = "dom"; }
-      });
-      term.loadAddon(addon);
-      webgl = addon;
-      kind = "webgl";
-    } catch (err) {
-      console.warn("[tui] WebGL renderer unavailable — using the DOM renderer:", err);
-      kind = "dom";
-    }
-  };
-  loadWebgl();
-
-  // Wraith fits itself to its host; do the same here.
-  const fit = () => {
-    if (el.clientWidth === 0 || el.clientHeight === 0) return; // hidden: keep the last size
-    try { fitAddon.fit(); } catch { /* not laid out yet */ }
-  };
-  const ro = new ResizeObserver(() => fit());
-  ro.observe(el);
-  fit();
-
-  // Track kitty keyboard protocol stack. Apps push/pop with CSI = / CSI < and enable/disable
-  // with CSI > / CSI <. When active, Shift+Enter must be encoded as \x1b[13;2u — xterm doesn't
-  // implement this protocol so we intercept and emit it ourselves.
-  let kittyDepth = 0;
-  const KITTY_PUSH_RE  = /\x1b\[=\d*u/g;  // CSI = Pu  (push)
-  const KITTY_POP_RE   = /\x1b\[<\d*u/g;  // CSI < Pu  (pop / disable-with-flags)
-  const KITTY_SET_RE   = /\x1b\[>\d*u/g;  // CSI > Pu  (set/enable — depth 0→1)
-
-  const dataListeners = new Set<(data: string) => void>();
-
-  term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-    if (kittyDepth <= 0) return true;
-    if (e.type !== "keydown") return true;
-    if (e.key === "Enter" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
-      if (e.type === "keydown") dataListeners.forEach((l) => l("\x1b[13;2u"));
-      return false; // suppress xterm's default \r
-    }
-    return true;
-  });
-
-  let disposed = false;
-  return {
-    get kind() { return kind; },
-    get cols() { return term.cols; },
-    get rows() { return term.rows; },
-    write: (data) => new Promise<void>((resolve, reject) => {
-      if (disposed) return reject(new Error("terminal disposed"));
-      // Track kitty keyboard protocol depth so Shift+Enter can be re-encoded.
-      const pushes = (data.match(KITTY_PUSH_RE) ?? []).length;
-      const pops   = (data.match(KITTY_POP_RE)  ?? []).length;
-      const sets   = (data.match(KITTY_SET_RE)   ?? []).length;
-      if (sets  > 0 && kittyDepth === 0) kittyDepth = 1;
-      kittyDepth = Math.max(0, kittyDepth + pushes - pops);
-      term.write(data, resolve);
-    }),
-    paste: (text) => { term.paste(text); return Promise.resolve(); },
-    fit,
-    focus: () => term.focus(),
-    onData: (l) => {
-      dataListeners.add(l);
-      const sub = term.onData(l);
-      return { dispose: () => { dataListeners.delete(l); sub.dispose(); } };
-    },
-    onResize: (l) => term.onResize(l),
-    onError: () => ({ dispose() {} }), // nothing asynchronous to report
-    onTitleChange: (l) => term.onTitleChange(l),
-    onBell: (l) => term.onBell(l),
-    // xterm's parser hands OSC 52 to a registered handler ("<targets>;<base64>").
-    onClipboard: (l) => term.parser.registerOscHandler(52, (data) => {
-      const b64 = data.slice(data.indexOf(";") + 1);
-      if (b64 && b64 !== "?") {
-        try { l(new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))); } catch { /* not base64 */ }
-      }
-      return true;
-    }),
-    dispose: async () => {
-      if (disposed) return;
-      disposed = true;
-      kittyDepth = 0;
-      dataListeners.clear();
-      ro.disconnect();
-      webgl?.dispose();
-      term.dispose();
-    },
-  };
 }

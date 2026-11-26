@@ -3128,8 +3128,6 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
             : "mt-2.5 h-[min(24rem,60vh)] overflow-hidden rounded"}
           style={{ minHeight: 0, background: tuiBg() }}
           onPointerUp={() => {
-            // After a mouse drag-select in the xterm fallback, the browser's native selection
-            // holds keyboard focus. Refocus the terminal input so keys reach the program again.
             const ta = inlineTuiRef.current?.querySelector<HTMLElement>("textarea");
             ta?.focus({ preventScroll: true });
           }}
