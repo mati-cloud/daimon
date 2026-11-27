@@ -122,7 +122,7 @@ dependencies = [
 
 [[package]]
 name = "daimon"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "dirs 5.0.1",
@@ -131,7 +131,7 @@ dependencies = [
 
 [[package]]
 name = "daimon-complete"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "dirs 6.0.0",
@@ -820,7 +820,7 @@ dependencies = [
 
 [[package]]
 name = "pty-daemon"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1083,7 +1083,7 @@ dependencies = [
 
 [[package]]
 name = "shell-parser"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "regex-lite",
 ]
@@ -1462,7 +1462,7 @@ dependencies = [
 
 [[package]]
 name = "win-backdrop"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "windows",
  "windows-core",

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.16.0](https://github.com/mati-cloud/daimon/compare/v0.15.0...v0.16.0) (2026-11-27)
+
+
+### Features
+
+* **complete:** rank startsWith before contains, inject cd/pushd history ([9320f22](https://github.com/mati-cloud/daimon/commit/9320f22867e922d6dcc5594e8698d1ea6ea357b1))
+* **git:** async statusline via broadcast mux, skeleton while pending ([e1105db](https://github.com/mati-cloud/daimon/commit/e1105db1be0b817fd41c083250226a34317bed76))
+* **keybinds:** new-session always fires via capture phase, focus TUI or composer on tab switch ([e09a327](https://github.com/mati-cloud/daimon/commit/e09a327aa72619f55744c56592162e3224a9aff3))
+* **statusline:** show ahead/behind counts in git segment ([0652c94](https://github.com/mati-cloud/daimon/commit/0652c946b9b466ba65cc3e00d3b3de585d8ff68d))
+
+
+### Bug Fixes
+
+* **tui:** refit and repaint TUI on tab switch, persist session title across tabs ([9dce566](https://github.com/mati-cloud/daimon/commit/9dce56665cd7458c6810948a9e75146da8a77533))
+
 ## [0.15.0](https://github.com/mati-cloud/daimon/compare/v0.14.7...v0.15.0) (2026-11-27)
 
 
