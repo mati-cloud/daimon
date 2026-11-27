@@ -16,7 +16,7 @@ const SEQ_RE =
   // CSI | OSC (BEL or ST) | DCS/SOS/PM/APC (ST) | other 2-byte ESC
   /\x1b\[([0-?]*)([ -/]*)([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[PX^_][^\x1b]*(?:\x1b\\)?|\x1b[^[\]PX^_]?/y;
 
-export function renderScreen(raw: string): string {
+export function renderScreen(raw: string, cols = 0): string {
   const rows: Cell[][] = [[]];
   let r = 0, c = 0;
   let sgr = "";   // SGR sequences in effect since the last reset
@@ -24,6 +24,10 @@ export function renderScreen(raw: string): string {
   const row = (i: number) => { while (rows.length <= i) rows.push([]); return rows[i]!; };
   const top = () => Math.max(0, rows.length - SCREEN_ROWS);
   const put = (ch: string) => {
+    // Auto-wrap at the terminal width: a program that hard-wraps long lines (prompt_toolkit)
+    // relies on the terminal moving to the next row at the margin. Without this, the wrapped
+    // tail stays on the same logical row and is later clobbered by a cursor-up redraw.
+    if (cols > 0 && c >= cols) { r++; row(r); c = 0; }
     const line = row(r);
     while (line.length < c) line.push({ ch: " ", sgr: "" });
     line[c] = { ch, sgr };

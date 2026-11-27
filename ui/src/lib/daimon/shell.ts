@@ -3,6 +3,7 @@ import { perf, type AttachInfo, type ShellContext } from "./rpc";
 import { now, LIVE_WINDOW, OutputStream, type Out } from "./parse";
 import { renderScreen } from "./screen";
 import { outputParser } from "./parseClient";
+import { InlineTuiBuffer } from "./inlineTui";
 export { OutputStream, parseOutput, capOutput, normalizeTerminal, LIVE_WINDOW, splitHtmlLines, looksLikeYaml } from "./parse";
 export type { Out, LsEntry, GitStatusFile, GitBranchNode, GitLogRef } from "./parse";
 
@@ -52,8 +53,9 @@ const TUI_ALTMOUSE_RE = /\x1b\[\?1000h|\x1b\[\?1049[lh]|\x1b\[\?25l/;
 // keystrokes; the outer shell only re-enables it after its own prompt marker.
 const TUI_HOME_RE  = /\x1b\[(\d*;\d*H|H\b)/;
 const TUI_ERASE_RE = /\x1b\[2J|\x1b\[3J/;
-// clintermission exits inline TUI by showing the cursor — use as re-enable signal.
-const TUI_SHOW_CURSOR_RE = /\x1b\[\?25h/;
+// prompt_toolkit shows the cursor at the end of EVERY frame, so ?25h can't mark exit.
+// It disables bracketed paste (\x1b[?2004l) exactly once, on teardown — the real exit signal.
+const TUI_INLINE_EXIT_RE = /\x1b\[\?2004l/;
 
 // Terminal state changes that mean nothing in a text block: private mode set/reset,
 // cursor save/restore (ESC 7 / ESC 8) and scroll-region set/reset (CSI r). Full-screen
@@ -324,7 +326,13 @@ export function sendRaw(tabId: string, data: string) {
   shell.write(tabId, data).catch(() => {});
 }
 
+// Last cols the PTY was resized to, per tab — used to replay inline-TUI redraws faithfully
+// (prompt_toolkit hard-wraps long lines at this width; a mismatched width loses the wrapped tail).
+const ptyColsMap = new Map<string, number>();
+export function ptyCols(tabId: string): number { return ptyColsMap.get(tabId) ?? 120; }
+
 export function resizePty(tabId: string, cols: number, rows: number) {
+  ptyColsMap.set(tabId, cols);
   shell.resize(tabId, cols, rows).catch(() => {});
 }
 
@@ -496,10 +504,8 @@ export async function run(
 
   let detectedTUI = false;
   let tuiLive = false;
-  // Accumulated inline TUI lines. cursor-up+erase-down truncates this buffer.
-  // Flushed to parser on cursor-show (menu exit).
-  let tuiLineBuf: string[] = [];
-  let tuiLineCur = "";  // current partial line being built
+  // Rebuilds the single final frame of a prompt_toolkit inline menu from the raw stream.
+  const tuiBuf = new InlineTuiBuffer(ptyCols(tabId));
   // The command's output as sent (up to RAW_KEEP chars), and whether it ever took over the
   // screen: output that only moves the cursor about (fastfetch, progress bars) is shown in the
   // inline terminal while it runs, then becomes the block's output as that screen ended up.
@@ -601,6 +607,14 @@ export async function run(
     parser.push(text);
     emitProgress();
   };
+  // Flush the accumulated inline-TUI frame (prompt_toolkit) as one clean text block.
+  // Called on teardown (\x1b[?2004l) or PTY exit, whichever comes first.
+  const flushInlineTui = () => {
+    if (!tuiLive) return;
+    tuiLive = false;
+    const flushed = tuiBuf.flush();
+    if (flushed) appendOutput(flushed);
+  };
 
   // Resuming: start from what the daemon kept. A full-screen program gets the inline
   // terminal (with its modes restored) and is asked to repaint once that's mounted.
@@ -667,35 +681,12 @@ export async function run(
         notifyTui(tabId, true);
         // fall through — continue feeding the parser so Block output stays live during TUI
       }
-      // Inline TUI (prompt_toolkit full_screen=False):
-      // Accumulate output in a line buffer; cursor-up+erase-down truncates it (simulates
-      // the terminal screen for inline redraws). On cursor-show (menu exit), flush the
-      // final buffer to the parser — exactly one clean copy of the menu.
+      // Inline TUI (prompt_toolkit full_screen=False): accumulate frames, keep only the last.
       if (tuiLive) {
-        // Process the raw data through the line buffer.
-        // Split on newlines and handle \x1b[NA\x1b[J (cursor-up N + erase-down).
-        let remaining = data;
-        // Find cursor-up+erase-down sequences and truncate the line buffer.
-        remaining = remaining.replace(/\x1b\[(\d*)A\x1b\[J?/g, (_m, n) => {
-          const up = parseInt(n || "1", 10);
-          // Remove the last `up` lines from buffer + current partial line.
-          tuiLineCur = "";
-          tuiLineBuf.splice(Math.max(0, tuiLineBuf.length - up));
-          return "";
-        });
-        // Accumulate remaining text into line buffer.
-        for (const ch of remaining) {
-          if (ch === "\n") { tuiLineBuf.push(tuiLineCur); tuiLineCur = ""; }
-          else tuiLineCur += ch;
-        }
-        // On cursor-show → menu exited: flush buffer to parser as plain text.
-        if (TUI_SHOW_CURSOR_RE.test(data)) {
-          if (tuiLineCur) { tuiLineBuf.push(tuiLineCur); tuiLineCur = ""; }
-          const flushed = tuiLineBuf.join("\n");
-          tuiLineBuf = []; tuiLineCur = "";
-          tuiLive = false;
-          if (flushed.trim()) appendOutput(flushed + "\n");
-        }
+        tuiBuf.feed(data);
+        // Bracketed-paste-off (\x1b[?2004l) marks prompt_toolkit teardown — flush the clean copy.
+        // (?25h fires every frame and can't mark exit; ?2004l fires once, on exit.)
+        if (TUI_INLINE_EXIT_RE.test(data)) flushInlineTui();
       }
       if (!tuiLive) appendOutput(cleanData);
     });
@@ -703,6 +694,7 @@ export async function run(
     globalExitOff = shell.onExit((tid, code) => {
       if (tid !== tabId) return;
       exitCode = code;
+      flushInlineTui(); // safety: flush any inline-TUI buffer if ?2004l never arrived
       // Interactive/TUI commands: remote shell never fires onContext, so resolve on exit.
       if (isInteractive || isStreamingInteractive || detectedTUI || insideInteractiveSession) {
         tEnd ??= Date.now();
