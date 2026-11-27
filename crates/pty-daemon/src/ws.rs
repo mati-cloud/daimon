@@ -1,8 +1,7 @@
-/// WebSocket server — output push + command dispatch channel.
-/// Browser (no Electrobun host) sends SessionCommand JSON frames; this module dispatches them
-/// via unix::dispatch() and sends SessionEvent::Response back to the originating client only.
+/// WebSocket server — output push only.
+/// Inbound frames from the browser are discarded; commands must arrive via the Unix socket.
 
-use crate::session::{SessionCommand, SessionEvent, SessionManager};
+use crate::session::SessionEvent;
 use crate::store::Store;
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
@@ -34,8 +33,6 @@ pub async fn serve(
     db: Arc<Store>,
     event_tx: mpsc::Sender<SessionEvent>,
     event_rx: mpsc::Receiver<SessionEvent>,
-    mgr: Arc<Mutex<SessionManager>>,
-    port: u16,
 ) -> Result<()> {
 
     // Broadcast task: fan out session events to all connected WebSocket clients.
@@ -104,8 +101,6 @@ pub async fn serve(
         let (client_tx, mut client_rx) = mpsc::channel::<SessionEvent>(256);
         let kill = Arc::new(Notify::new());
         let clients = clients.clone();
-        let mgr = mgr.clone();
-        let db = db.clone();
 
         tokio::spawn(async move {
             let ws = match tokio::time::timeout(HANDSHAKE_LIMIT, tokio_tungstenite::accept_async(stream)).await {
@@ -134,29 +129,10 @@ pub async fn serve(
                 }
             });
 
-            // Dispatch incoming text frames as SessionCommand; send responses to this client only.
+            // Drain inbound frames without acting on them; WS is output-only.
             while tokio::select! {
                 m = source.next() => {
-                    match m {
-                        Some(Ok(Message::Text(text))) => {
-                            match serde_json::from_str::<SessionCommand>(&text) {
-                                Ok(cmd) => {
-                                    let mgr = mgr.clone();
-                                    let db = db.clone();
-                                    let resp_tx = client_tx.clone();
-                                    tokio::spawn(async move {
-                                        if let Some(ev) = crate::unix::dispatch(cmd, mgr, db, port).await {
-                                            let _ = resp_tx.send(ev).await;
-                                        }
-                                    });
-                                }
-                                Err(e) => warn!("[ws] bad command from {addr}: {e}"),
-                            }
-                            true
-                        }
-                        Some(Ok(_)) => true,
-                        Some(Err(_)) | None => false,
-                    }
+                    matches!(m, Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_))) | Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))))
                 }
                 _ = kill.notified() => false,
             } {}
