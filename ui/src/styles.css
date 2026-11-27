@@ -560,3 +560,7 @@ html.magnify-grabbing, html.magnify-grabbing * { cursor: grabbing !important; us
 .capturing .block-mode-hints { display: none !important; }
 /* Hide block-ring dashed border and hover background during capture. */
 .capturing .block-ring::after { display: none !important; }
+
+/* Path links: only colorize/underline when Cmd/Ctrl is held. */
+[data-cmdpath] { color: inherit; cursor: default; }
+body.cmd-held [data-cmdpath]:hover { color: hsl(var(--signal) / 0.9); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }

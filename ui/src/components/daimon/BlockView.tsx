@@ -269,6 +269,13 @@ function linkify(text: string): React.ReactNode {
   return linkifyAll(text, undefined);
 }
 
+// Toggle body.cmd-held when Cmd/Ctrl is held — used to gate path link colorization.
+if (typeof window !== "undefined") {
+  window.addEventListener("keydown", (e) => { if (e.metaKey || e.ctrlKey) document.body.classList.add("cmd-held"); });
+  window.addEventListener("keyup",   (e) => { if (!e.metaKey && !e.ctrlKey) document.body.classList.remove("cmd-held"); });
+  window.addEventListener("blur",    ()  => document.body.classList.remove("cmd-held"));
+}
+
 const URL_RE = /https?:\/\/[^\s<>"{}|\\^`[\]]+/g;
 // Absolute paths and ~/paths — must be at word boundary, at least 2 segments or ~/
 const PATH_RE = /(?:^|(?<=\s))(?:~\/[^\s"'<>]+|\/(?:[^\s"'<>/]+\/)+[^\s"'<>]*[^\s"'<>./])/g;
@@ -310,8 +317,9 @@ function linkifyAll(text: string, onPathClick: ((path: string) => void) | undefi
         node: (
           <button
             key={key++}
-            onClick={() => onPathClick(p)}
-            className="font-mono text-signal/70 hover:text-signal hover:underline underline-offset-2 cursor-pointer"
+            data-cmdpath
+            onClick={(e) => { if (e.metaKey || e.ctrlKey) onPathClick(p); }}
+            className="font-mono"
           >
             {p}
           </button>
@@ -1077,11 +1085,10 @@ export function BlockMeta({ block, className = "" }: { block: Block; className?:
 }
 
 /** The Ctrl/Cmd+Shift block-mode keys, in the hovered block's header row; fades in/out with the mode. */
-function BlockModeHints({ open, collapsible }: { open: boolean; collapsible: "collapse" | "expand" | null }) {
+function BlockModeHints({ open }: { open: boolean }) {
   const shown = usePresence(open);
   if (!shown) return null;
   const actions: [string, string][] = [["C", "copy all"], ["I", "cmd"], ["O", "output"], ["R", "re-run"], ["F", "find"], ["P", "pin"], ["S", "shot"]];
-  if (collapsible) actions.push(["E", collapsible]);
   return (
     <span
       data-state={open ? "open" : "closed"}
@@ -1339,7 +1346,7 @@ function GitPath({ path, dim, onCd }: { path: string; dim?: boolean; onCd?: ((pa
     </>
   );
   return onCd ? (
-    <button className="truncate text-left font-mono underline-offset-4 decoration-muted-foreground/30 hover:underline" title={`cd ${dir || "."}`} onClick={() => onCd(path)}>{body}</button>
+    <button data-cmdpath className="truncate text-left font-mono underline-offset-4 decoration-muted-foreground/30" title={`cd ${dir || "."}`} onClick={(e) => { if (e.metaKey || e.ctrlKey) onCd(path); }}>{body}</button>
   ) : (
     <span className="truncate">{body}</span>
   );
@@ -2657,8 +2664,9 @@ function OutView({ out: rawOut, input = "", ctx = "", cwd, isLast = false, onSea
           <div key={it.name} className="flex items-baseline justify-between gap-3 font-mono text-[13px]">
             {onPathClick && it.dir ? (
               <button
-                className="font-mono text-signal hover:underline cursor-pointer"
-                onClick={() => onPathClick(it.name)}
+                data-cmdpath
+                className="font-mono text-signal"
+                onClick={(e) => { if (e.metaKey || e.ctrlKey) onPathClick(it.name); }}
               >
                 {it.name}/
               </button>
@@ -2713,9 +2721,6 @@ function OutView({ out: rawOut, input = "", ctx = "", cwd, isLast = false, onSea
 
   return null;
 }
-
-/** Collapsed output clamp; output taller than this is "long" and becomes collapsible. */
-const COLLAPSED_MAX_PX = 320;
 
 /** Terminal background resolved from CSS --background at call time (theme-aware). Returns #rrggbb. */
 function tuiBg(): string {
@@ -2813,29 +2818,11 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
   const pm = useContext(PresentationModeContext);
   const ok = block.code === 0;
   const failed = !block.pending && !ok;
-  const [expanded, setExpandedRaw] = useState(true);
   const activityProbe = useSyncExternalStore(subscribeProbe, () => block.pending ? getLatestProbe(sessionId) : undefined, () => undefined);
   const [probeOpen, setProbeOpen] = useState(false);
-  // Close drill-down when probe clears (command finished)
   const prevProbeRef = useRef<typeof activityProbe>(undefined);
   if (prevProbeRef.current && !activityProbe && probeOpen) setProbeOpen(false);
   prevProbeRef.current = activityProbe;
-  // Once the user toggles a block by hand, stop auto-collapsing it.
-  const userToggledRef = useRef(false);
-  const setExpanded = useCallback((v: boolean | ((x: boolean) => boolean)) => {
-    userToggledRef.current = true;
-    setExpandedRaw(v);
-  }, []);
-
-  // Super-shift (⌘⇧ hover + E) toggles collapse on this block.
-  useEffect(() => {
-    const onToggle = (e: Event) => {
-      if ((e as CustomEvent).detail?.blockId === block.id) setExpanded((x) => !x);
-    };
-    window.addEventListener("block-toggle-collapse", onToggle);
-    return () => window.removeEventListener("block-toggle-collapse", onToggle);
-  }, [block.id, setExpanded]);
-
   // Super-shift F: open inline find bar.
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
@@ -2859,19 +2846,6 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
     window.addEventListener("block-pin-toggle", onPin);
     return () => window.removeEventListener("block-pin-toggle", onPin);
   }, [block.id, onPinToggle]);
-
-  useEffect(() => {
-    if (!isLast) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (inTerminal(e)) return;
-      if ((e.metaKey || e.ctrlKey) && (e.key === "e" || e.key === "E")) {
-        e.preventDefault();
-        setExpanded((x) => !x);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [isLast, setExpanded]);
 
   // Inline TUI: the terminal is mounted directly in this block's div
   const inlineTuiRef = useRef<HTMLDivElement>(null);
@@ -2937,6 +2911,19 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
       }
     }));
   }, [tuiFullscreen]);
+  // Tab switch back to this session: re-fit + Ctrl-L so the TUI repaints at the right size.
+  useEffect(() => {
+    if (!isTuiActive || !sessionId) return;
+    const onVisible = (e: Event) => {
+      if ((e as CustomEvent<{ sid: string }>).detail?.sid !== sessionId) return;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        tuiFitRef.current?.();
+        setTimeout(() => { tuiFitRef.current?.(); sendRaw(sessionId, '\x0c'); }, 150);
+      }));
+    };
+    window.addEventListener("tui-session-visible", onVisible);
+    return () => window.removeEventListener("tui-session-visible", onVisible);
+  }, [isTuiActive, sessionId]);
   useEffect(() => {
     if (!isTuiActive || !inlineTuiRef.current) return;
     const el = inlineTuiRef.current;
@@ -2983,8 +2970,6 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
         t.onTitleChange((title) => window.dispatchEvent(new CustomEvent("tui-title", { detail: { sid: sessionId, title } }))),
         t.onBell(() => window.dispatchEvent(new CustomEvent("tui-bell", { detail: { sid: sessionId } }))),
         t.onClipboard(writeClipboard),
-        // The title belongs to the program: gone with its terminal.
-        { dispose: () => window.dispatchEvent(new CustomEvent("tui-title", { detail: { sid: sessionId, title: "" } })) },
       );
       const onTuiPaste = (ev: Event) => {
         const { sid, text } = (ev as CustomEvent<{ sid: string; text: string }>).detail;
@@ -3019,20 +3004,6 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
   // Only create once when isTuiActive first becomes true
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTuiActive]);
-
-  const outputRef = useRef<HTMLDivElement>(null);
-  // "Long" = natural output height exceeds the collapsed clamp. Only long blocks are collapsible.
-  const [isLong, setIsLong] = useState(false);
-  useEffect(() => {
-    const el = outputRef.current;
-    if (!el) return;
-    const long = el.scrollHeight > COLLAPSED_MAX_PX + 4;
-    if (long !== isLong) setIsLong(long);
-  });
-  // Smart default: when a newer block arrives, auto-collapse this one if it's long.
-  useEffect(() => {
-    if (!isLast && isLong && !block.pending && !userToggledRef.current) setExpandedRaw(false);
-  }, [isLast, isLong, block.pending]);
 
   return (
     <article className={`rise group relative pl-9 transition-[background-color,padding,margin,border-radius] duration-150 ${failed ? "rounded-lg bg-alarm/5 py-2 pr-3 -mx-3" : ""} ${isSelected ? "rounded-lg ring-2 ring-signal/50 bg-signal/5 py-1 pr-2 -mx-2" : ""}`}>
@@ -3074,7 +3045,7 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
         )}
         <span className="ml-auto shrink-0 flex items-center gap-3">
           {isPinned && <PinIcon className="size-3 text-signal/70" aria-label="pinned" />}
-          <BlockModeHints open={modeActive} collapsible={isLong ? (expanded ? "collapse" : "expand") : null} />
+          <BlockModeHints open={modeActive} />
           <BlockMeta block={block} />
         </span>
       </header>
@@ -3183,29 +3154,14 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
         </div>
       )}
       {(!isTuiActive || !tuiGridHasContent) && block.out.length > 0 && (
-        <div className="relative mt-2.5">
+        <div className="mt-2.5">
           <div
-            ref={outputRef}
-            data-collapsible={isLong ? (expanded ? "expanded" : "collapsed") : undefined}
-            className="space-y-3 overflow-hidden transition-all"
-            style={expanded || !isLong ? undefined : { maxHeight: COLLAPSED_MAX_PX }}
+            className="space-y-3"
           >
             {block.out.map((o, i) => (
               <OutView key={i} out={o} input={block.input} ctx={block.ctx || currentCtx} cwd={"/" + block.cwd.join("/")} isLast={!!isLast && i === block.out.length - 1} onSearch={onSearch ?? null} {...(onPathClick ? { onPathClick } : {})} />
             ))}
           </div>
-          {!expanded && isLong && (
-            <div className="absolute bottom-0 left-0 right-0 flex justify-center bg-gradient-to-t from-paper to-transparent pt-8 pb-1">
-              <button
-                onClick={() => setExpanded(true)}
-                title="Expand (hold ⌘⇧ + E while hovering)"
-                className="flex items-center gap-1.5 rounded-full border border-line bg-card px-3 py-0.5 font-mono text-[11px] text-muted-foreground shadow-sm hover:text-foreground transition-colors"
-              >
-                <ChevronDownIcon className="size-3" />
-                expand
-              </button>
-            </div>
-          )}
         </div>
       )}
       {(!isTuiActive || !tuiGridHasContent) && !block.pending && block.out.length > 0 && <LinkPreviews out={block.out} />}

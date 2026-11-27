@@ -113,7 +113,6 @@ registerShortcut({ id: "block-copy-all",  combo: "⌘⇧ C",      description: "
 registerShortcut({ id: "block-copy-cmd",  combo: "⌘⇧ I",      description: "Copy command",              category: "Block Mode" });
 registerShortcut({ id: "block-copy-out",  combo: "⌘⇧ O",      description: "Copy output",               category: "Block Mode" });
 registerShortcut({ id: "block-rerun",     combo: "⌘⇧ R",      description: "Re-run command",            category: "Block Mode" });
-registerShortcut({ id: "block-expand",    combo: "⌘⇧ E",      description: "Expand / collapse block",   category: "Block Mode" });
 registerShortcut({ id: "block-find",      combo: "⌘⇧ F",      description: "Find in block",             category: "Block Mode" });
 registerShortcut({ id: "block-pin",       combo: "⌘⇧ P",      description: "Pin / unpin block",         category: "Block Mode" });
 registerShortcut({ id: "block-screenshot", combo: "⌘⇧ S",     description: "Screenshot block → clipboard (secrets redacted)", category: "Block Mode" });

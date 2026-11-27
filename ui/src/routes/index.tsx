@@ -611,6 +611,8 @@ function Daimon() {
   useEffect(() => {
     if (follows(activeId)) toast.dismiss("new-output");
     updateHeaderBlock(activeId);
+    // If the newly-visible session has an active TUI, tell its BlockView to re-fit and repaint.
+    window.dispatchEvent(new CustomEvent("tui-session-visible", { detail: { sid: activeId } }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
 
@@ -626,6 +628,8 @@ function Daimon() {
         setTuiBlockIds((m) => new Map(m).set(sessionId, pendingBlock.id));
       } else if (!active) {
         setTuiBlockIds((m) => { const next = new Map(m); next.delete(sessionId); return next; });
+        // TUI program exited: clear the title it set so the sidebar shows the last command again.
+        return prev.map((s) => s.id === sessionId && s.title ? (({ title: _, ...r }) => r)(s) : s);
       }
       return prev;
     });
@@ -1115,9 +1119,6 @@ function Daimon() {
         e.preventDefault();
         targets.forEach(b => submit(b.input));
         if (n > 1) toast.success(`Re-running ${n} blocks`, { duration: 1500 });
-      } else if (key === "E") {
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent("block-toggle-collapse", { detail: { blockId: block.id } }));
       } else if (key === "F") {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("block-find-open", { detail: { blockId: block.id } }));
@@ -1812,10 +1813,8 @@ function Daimon() {
           </button>
 
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="no-drag flex items-center gap-2 font-mono text-[13px] text-foreground">
-              {active.state.cwd[active.state.cwd.length - 1] ?? "~"}
-              {gitBranch && <span className="text-muted-foreground/60">{gitBranch}</span>}
-              <span className="text-muted-foreground/40">/</span>
+            <span className="no-drag font-mono text-[13px] text-foreground">
+              {displayPath(active.state.cwd)}
             </span>
             {/* The command of the block scrolled out above the viewport, sticky like a section
                 heading: click to scroll back to its start. */}
