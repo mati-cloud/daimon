@@ -2889,6 +2889,21 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
   if (tuiGrid && tuiGrid.cells.some((v, i) => i % 4 === 0 && v !== 0)) tuiGridHasContentRef.current = true;
   if (!isTuiActive) tuiGridHasContentRef.current = false;
   const tuiGridHasContent = tuiGridHasContentRef.current;
+  // Scroll the block top into view the first time inline TUI content appears,
+  // so the header row ("Select device / port to check:" etc.) isn't hidden above the viewport.
+  const tuiScrolledRef = useRef(false);
+  if (!isTuiActive) tuiScrolledRef.current = false;
+  if (tuiGridHasContent && !tuiScrolledRef.current) {
+    tuiScrolledRef.current = true;
+    requestAnimationFrame(() => {
+      const article = inlineTuiRef.current?.closest("article");
+      if (article) {
+        const rect = article.getBoundingClientRect();
+        // Only scroll if the top of the block is hidden above the viewport.
+        if (rect.top < 0) article.scrollIntoView({ block: "start", behavior: "smooth" });
+      }
+    });
+  }
   // Seed from map in case altScreenEnter already fired before this component mounted
   const [tuiFullscreen, setTuiFullscreen] = useState(() => getAltScreen(sessionId));
   const tuiFitRef = useRef<(() => void) | null>(null);

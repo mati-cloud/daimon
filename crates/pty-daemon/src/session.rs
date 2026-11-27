@@ -388,6 +388,9 @@ impl Session {
         cmd.env("COLORTERM", "truecolor");
         cmd.env("FORCE_COLOR", "1");
         cmd.env("CLICOLOR_FORCE", "1");
+        // prompt_toolkit's CPR round-trip through the browser WS exceeds its 2s timeout,
+        // causing "WARNING: your terminal doesn't support CPR". Disable CPR probing.
+        cmd.env("PROMPT_TOOLKIT_NO_CPR", "1");
         // Don't leak a parent agent's non-interactive overrides into the user's shell: e.g. a
         // daemon started from Claude Code inherits GIT_EDITOR=true, so `git commit` would
         // "edit" with `true` and abort on an empty message instead of opening an editor.

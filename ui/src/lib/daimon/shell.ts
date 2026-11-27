@@ -496,6 +496,10 @@ export async function run(
 
   let detectedTUI = false;
   let tuiLive = false;
+  // Accumulated inline TUI lines. cursor-up+erase-down truncates this buffer.
+  // Flushed to parser on cursor-show (menu exit).
+  let tuiLineBuf: string[] = [];
+  let tuiLineCur = "";  // current partial line being built
   // The command's output as sent (up to RAW_KEEP chars), and whether it ever took over the
   // screen: output that only moves the cursor about (fastfetch, progress bars) is shown in the
   // inline terminal while it runs, then becomes the block's output as that screen ended up.
@@ -663,8 +667,36 @@ export async function run(
         notifyTui(tabId, true);
         // fall through — continue feeding the parser so Block output stays live during TUI
       }
-      // Inline TUI (clintermission) exits by showing the cursor — resume plain output after.
-      if (tuiLive && TUI_SHOW_CURSOR_RE.test(data)) tuiLive = false;
+      // Inline TUI (prompt_toolkit full_screen=False):
+      // Accumulate output in a line buffer; cursor-up+erase-down truncates it (simulates
+      // the terminal screen for inline redraws). On cursor-show (menu exit), flush the
+      // final buffer to the parser — exactly one clean copy of the menu.
+      if (tuiLive) {
+        // Process the raw data through the line buffer.
+        // Split on newlines and handle \x1b[NA\x1b[J (cursor-up N + erase-down).
+        let remaining = data;
+        // Find cursor-up+erase-down sequences and truncate the line buffer.
+        remaining = remaining.replace(/\x1b\[(\d*)A\x1b\[J?/g, (_m, n) => {
+          const up = parseInt(n || "1", 10);
+          // Remove the last `up` lines from buffer + current partial line.
+          tuiLineCur = "";
+          tuiLineBuf.splice(Math.max(0, tuiLineBuf.length - up));
+          return "";
+        });
+        // Accumulate remaining text into line buffer.
+        for (const ch of remaining) {
+          if (ch === "\n") { tuiLineBuf.push(tuiLineCur); tuiLineCur = ""; }
+          else tuiLineCur += ch;
+        }
+        // On cursor-show → menu exited: flush buffer to parser as plain text.
+        if (TUI_SHOW_CURSOR_RE.test(data)) {
+          if (tuiLineCur) { tuiLineBuf.push(tuiLineCur); tuiLineCur = ""; }
+          const flushed = tuiLineBuf.join("\n");
+          tuiLineBuf = []; tuiLineCur = "";
+          tuiLive = false;
+          if (flushed.trim()) appendOutput(flushed + "\n");
+        }
+      }
       if (!tuiLive) appendOutput(cleanData);
     });
 

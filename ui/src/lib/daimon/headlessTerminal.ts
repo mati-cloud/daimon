@@ -17,6 +17,10 @@ export type GridSnapshot = {
   cursorVisible: boolean;
   /** 0=block 1=bar 2=underline */
   cursorStyle: number;
+  /** True while the PTY stream has emitted \x1b[J (erase-down) since the last
+   *  full-screen clear — signals an inline TUI (prompt_toolkit/clintermission)
+   *  is redrawing from the cursor position upward. */
+  inlineTui: boolean;
 };
 
 type Listener<T> = (value: T) => void;
@@ -74,8 +78,10 @@ export async function mountHeadless(
   const cell = measureCell(el, opts.fontSize, opts.lineHeight);
   const rect = el.getBoundingClientRect();
   let cols = Math.max(1, Math.floor(rect.width / cell.w));
-  // Ensure enough rows for inline menus (clintermission needs ~15+ for a typical port list).
-  let rows = Math.max(24, Math.floor(rect.height / cell.h));
+  // Use a large fixed row count so long output (tracebacks, logs) doesn't scroll
+  // into scrollback and disappear from the grid. TuiGrid trims trailing blank rows
+  // so the visual height stays compact regardless of this internal PTY size.
+  let rows = 200;
 
   const hl = new Headless(cols, rows, opts.scrollback);
   const enc = new TextEncoder();
@@ -91,6 +97,9 @@ export async function mountHeadless(
   let disposed = false;
   let lastDigest = "";
   let rafId = 0;
+  // prompt_toolkit hides the cursor (\x1b[?25l) while drawing an inline TUI frame
+  // and shows it again (\x1b[?25h) when done. Use this as the reliable inline-TUI signal.
+  let inlineTui = false;
 
   function drainEvents() {
     for (const ev of hl.take_events() as [number, Uint8Array][]) {
@@ -112,10 +121,11 @@ export async function mountHeadless(
       cells: hl.grid(),
       cols,
       rows,
-      cursorCol: sc[4],
-      cursorRow: sc[3],
+      cursorCol: sc[4] ?? 0,
+      cursorRow: sc[3] ?? 0,
       cursorVisible: hl.mode(25),
       cursorStyle: hl.cursor_style(),
+      inlineTui,
     };
     hl.acknowledge_damage();
     onGrid(snap);
@@ -182,6 +192,10 @@ export async function mountHeadless(
     write(data_) {
       hl.write(enc.encode(data_));
       drainEvents();
+      // \x1b[?25l = hide cursor: prompt_toolkit is drawing an inline TUI frame.
+      // \x1b[?25h = show cursor: prompt_toolkit finished drawing (or app exited menu).
+      if (data_.includes("\x1b[?25l")) inlineTui = true;
+      if (data_.includes("\x1b[?25h")) inlineTui = false;
       // Reply to CPR queries (\x1b[6n) so clintermission/inquirer don't hang waiting.
       if (data_.includes("\x1b[6n")) {
         const sc = hl.screen();
@@ -200,7 +214,7 @@ export async function mountHeadless(
       const r = el.getBoundingClientRect();
       const c = measureCell(el, opts.fontSize, opts.lineHeight);
       cols = Math.max(1, Math.floor(r.width / c.w));
-      rows = Math.max(1, Math.floor(r.height / c.h));
+      // Keep rows fixed at 200 — same as initial. Only cols change on resize.
       hl.resize(cols, rows);
       resizes.emit({ cols, rows });
     },
