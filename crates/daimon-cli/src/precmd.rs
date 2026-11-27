@@ -1,6 +1,7 @@
 /// Emits OSC 133 prompt mark with context JSON.
 /// Called on every precmd — must be fast.
-/// Git info via the git CLI; env vars that plugins asked for (`watchEnv`).
+/// Git info is fetched asynchronously by the daemon after this exits; env vars that
+/// plugins asked for (`watchEnv`) are included directly since they're just env reads.
 pub fn run() -> anyhow::Result<()> {
     let pwd = std::env::var("PWD").unwrap_or_else(|_| {
         std::env::current_dir()
@@ -13,20 +14,11 @@ pub fn run() -> anyhow::Result<()> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
 
-    let git = git_info(&pwd);
-
     let mut obj = serde_json::Map::new();
-    obj.insert("pwd".into(),      serde_json::Value::String(pwd));
-    obj.insert("exitCode".into(), serde_json::Value::Number(exit_code.into()));
-
-    if let Some(g) = git {
-        obj.insert("gitBranch".into(),  serde_json::Value::String(g.branch));
-        obj.insert("gitDirty".into(),   serde_json::Value::Bool(g.dirty));
-        obj.insert("gitAhead".into(),   serde_json::Value::Number(g.ahead.into()));
-        obj.insert("gitBehind".into(),  serde_json::Value::Number(g.behind.into()));
-        obj.insert("gitAdded".into(),   serde_json::Value::Number(g.added.into()));
-        obj.insert("gitRemoved".into(), serde_json::Value::Number(g.removed.into()));
-    }
+    obj.insert("pwd".into(),        serde_json::Value::String(pwd));
+    obj.insert("exitCode".into(),   serde_json::Value::Number(exit_code.into()));
+    // Signal the daemon to fetch git info and push a GitContext event.
+    obj.insert("gitPending".into(), serde_json::Value::Bool(true));
 
     // Env vars plugins asked for (`watchEnv`), e.g. KUBECONFIG or OS_REGION_NAME: only
     // the shell has them, and only the requested ones leave it.

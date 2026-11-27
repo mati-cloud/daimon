@@ -21,7 +21,8 @@ type DaemonEvent =
   | { type: "response"; req_id: string; ok: boolean; data: unknown }
   | { type: "pluginsChanged" }
   | { type: "specsChanged" }
-  | { type: "activityProbe"; tab_id: string; quiet_ms: number; processes: { pid: number; ppid: number; name: string; cpu_pct: number | null }[]; net_connections: { process: string; local: string; remote: string; state: string }[] };
+  | { type: "activityProbe"; tab_id: string; quiet_ms: number; processes: { pid: number; ppid: number; name: string; cpu_pct: number | null }[]; net_connections: { process: string; local: string; remote: string; state: string }[] }
+  | { type: "gitContext"; tab_id: string; context: Record<string, unknown> };
 
 /** A plugin file as the daemon reports it. `source` only when approved (see plugins.rs). */
 export type PluginEntry = {
@@ -233,6 +234,9 @@ async function connect() {
       latestProbe.set(ev.tab_id, probe);
       probeSubscribers.forEach((fn) => fn());
       activityProbeListeners.forEach((fn) => fn(probe));
+    } else if (ev.type === "gitContext") {
+      lastContext.set(ev.tab_id, { ...lastContext.get(ev.tab_id), ...ev.context });
+      contextListeners.forEach((fn) => fn(ev.tab_id, ev.context as ShellContext));
     } else if (ev.type === "response") {
       const p = pendingRequests.get(ev.req_id);
       if (p) {

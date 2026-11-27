@@ -8,9 +8,20 @@ use crate::integration::Shell;
 use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use serde::{Deserialize, Serialize};
 use shell_parser::{is_alt_screen_enter, is_command_start_marker, is_prompt_marker, strip_osc133, strip_pty_modes};
+use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, broadcast};
+
+/// In-flight git fetches keyed by cwd. Each entry is a broadcast sender; all waiters
+/// for the same cwd subscribe and receive the same result from one git spawn.
+/// Entries are removed once the result is broadcast (new arrivals spawn fresh).
+type GitMux = Arc<Mutex<HashMap<PathBuf, broadcast::Sender<Option<serde_json::Value>>>>>;
+
+pub fn git_mux() -> GitMux {
+    Arc::new(Mutex::new(HashMap::new()))
+}
 
 /// Messages sent from session → WebSocket → frontend.
 #[derive(Debug, Clone, Serialize)]
@@ -45,6 +56,8 @@ pub enum SessionEvent {
         /// Active network connections across the whole process tree.
         net_connections: Vec<ProbeConn>,
     },
+    /// Async git context pushed after a Prompt with gitPending=true.
+    GitContext { tab_id: String, context: serde_json::Value },
 }
 
 /// One process in the activity probe tree.
@@ -362,7 +375,7 @@ pub struct Session {
 impl Session {
     /// Spawn a new PTY session running the user's default shell.
     /// Streams output to `event_tx` until the shell exits.
-    pub fn spawn(tab_id: String, event_tx: mpsc::Sender<SessionEvent>, cwd: Option<String>) -> Result<Self> {
+    pub fn spawn(tab_id: String, event_tx: mpsc::Sender<SessionEvent>, cwd: Option<String>, git_mux: GitMux) -> Result<Self> {
         let pty_system = NativePtySystem::default();
         let pair = pty_system
             .openpty(PtySize { rows: 24, cols: 120, pixel_width: 0, pixel_height: 0 })
@@ -418,6 +431,7 @@ impl Session {
         let tid = tab_id.clone();
         let reply_writer = writer.clone();
         let st = state.clone();
+        let rt = tokio::runtime::Handle::current();
 
         // One dedicated reader thread per session — owns the PTY master reader.
         // No shared state with other sessions.
@@ -513,8 +527,50 @@ impl Session {
                             let ctx = extract_context_json(&raw).unwrap_or_default();
                             let _ = tx.blocking_send(SessionEvent::Prompt {
                                 tab_id: tid.clone(),
-                                context: ctx,
+                                context: ctx.clone(),
                             });
+                            // If the shell flagged gitPending, spawn async git fetch via mux.
+                            let pending_git = ctx.as_str()
+                                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                                .and_then(|v| v.get("gitPending").and_then(|b| b.as_bool()))
+                                .unwrap_or(false);
+                            let cwd_for_git = ctx.as_str()
+                                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                                .and_then(|v| v.get("pwd").and_then(|p| p.as_str()).map(PathBuf::from));
+                            if pending_git {
+                                if let Some(cwd_path) = cwd_for_git {
+                                    let push_tid = tid.clone();
+                                    let push_tx = tx.clone();
+                                    let mux = git_mux.clone();
+                                    rt.spawn(async move {
+                                        let mut rx = {
+                                            let mut map = mux.lock().unwrap();
+                                            if let Some(sender) = map.get(&cwd_path) {
+                                                sender.subscribe()
+                                            } else {
+                                                let (tx_bc, rx) = broadcast::channel(1);
+                                                map.insert(cwd_path.clone(), tx_bc.clone());
+                                                let cwd_str = cwd_path.to_string_lossy().into_owned();
+                                                let mux2 = mux.clone();
+                                                tokio::spawn(async move {
+                                                    let result = tokio::task::spawn_blocking(move || {
+                                                        crate::precmd_git::git_context(&cwd_str)
+                                                    }).await.ok().flatten();
+                                                    mux2.lock().unwrap().remove(&cwd_path);
+                                                    let _ = tx_bc.send(result);
+                                                });
+                                                rx
+                                            }
+                                        };
+                                        if let Ok(Some(ctx)) = rx.recv().await {
+                                            let _ = push_tx.send(SessionEvent::GitContext {
+                                                tab_id: push_tid,
+                                                context: ctx,
+                                            }).await;
+                                        }
+                                    });
+                                }
+                            }
                         }
                     }
                     Err(_) => break,
@@ -756,15 +812,16 @@ fn prompt_mark_end(data: &str) -> Option<usize> {
 pub struct SessionManager {
     sessions: std::collections::HashMap<String, Session>,
     event_tx: mpsc::Sender<SessionEvent>,
+    git_mux: GitMux,
 }
 
 impl SessionManager {
     pub fn new(event_tx: mpsc::Sender<SessionEvent>) -> Self {
-        Self { sessions: Default::default(), event_tx }
+        Self { sessions: Default::default(), event_tx, git_mux: git_mux() }
     }
 
     pub fn open(&mut self, tab_id: String, cwd: Option<String>) -> Result<()> {
-        let session = Session::spawn(tab_id.clone(), self.event_tx.clone(), cwd)?;
+        let session = Session::spawn(tab_id.clone(), self.event_tx.clone(), cwd, self.git_mux.clone())?;
         self.sessions.insert(tab_id, session);
         Ok(())
     }
@@ -842,7 +899,7 @@ mod tests {
     #[tokio::test]
     async fn tty_raw_follows_icanon() {
         let (tx, _rx) = mpsc::channel(1024);
-        let s = Session::spawn("tab-raw".into(), tx, None).unwrap();
+        let s = Session::spawn("tab-raw".into(), tx, None, crate::session::git_mux()).unwrap();
         let wait = || tokio::time::sleep(std::time::Duration::from_millis(800));
         wait().await;
         s.write("sleep 2\n", None).unwrap();
@@ -858,7 +915,7 @@ mod tests {
     #[tokio::test]
     async fn session_spawns_and_exits() {
         let (tx, mut rx) = mpsc::channel(64);
-        let session = Session::spawn("tab-1".into(), tx, None).unwrap();
+        let session = Session::spawn("tab-1".into(), tx, None, crate::session::git_mux()).unwrap();
 
         // Run a quick command and exit
         session.write("echo hello_daimon\nexit\n", None).unwrap();
@@ -891,8 +948,8 @@ mod tests {
         let (tx1, mut rx1) = mpsc::channel(64);
         let (tx2, mut rx2) = mpsc::channel(64);
 
-        let s1 = Session::spawn("tab-1".into(), tx1, None).unwrap();
-        let s2 = Session::spawn("tab-2".into(), tx2, None).unwrap();
+        let s1 = Session::spawn("tab-1".into(), tx1, None, crate::session::git_mux()).unwrap();
+        let s2 = Session::spawn("tab-2".into(), tx2, None, crate::session::git_mux()).unwrap();
 
         s1.write("echo from_tab_1\nexit\n", None).unwrap();
         s2.write("echo from_tab_2\nexit\n", None).unwrap();

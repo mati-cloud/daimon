@@ -7,6 +7,7 @@ mod kitty_graphics;
 mod launcher_env;
 mod link_preview;
 mod plugins;
+mod precmd_git;
 mod session;
 mod shell_env;
 mod specs;

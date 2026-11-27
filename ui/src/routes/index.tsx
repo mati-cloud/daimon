@@ -247,6 +247,7 @@ function Daimon() {
   const [gitBehind, setGitBehind] = useState(0);
   const [gitAdded, setGitAdded] = useState(0);
   const [gitRemoved, setGitRemoved] = useState(0);
+  const [gitPending, setGitPending] = useState(false);
   const [showBadges, setShowBadges] = useState(true);
   const [showPowerline, setShowPowerline] = useState(false);
   const [hideKeys, setHideKeys] = useState(false);
@@ -457,7 +458,8 @@ function Daimon() {
   // Track git branch from shell context updates
   useEffect(() => {
     const off = shell.onContext((_tabId, ctx) => {
-      if (ctx.gitBranch !== undefined) setGitBranch(ctx.gitBranch || null);
+      if ((ctx as { gitPending?: boolean }).gitPending) { setGitPending(true); return; }
+      if (ctx.gitBranch !== undefined) { setGitBranch(ctx.gitBranch || null); setGitPending(false); }
       if (ctx.gitDirty !== undefined) setGitDirty(!!ctx.gitDirty);
       if (ctx.gitAhead !== undefined) setGitAhead(Number(ctx.gitAhead) || 0);
       if (ctx.gitBehind !== undefined) setGitBehind(Number(ctx.gitBehind) || 0);
@@ -1449,6 +1451,7 @@ function Daimon() {
               gitDirty={gitDirty}
               gitAdded={gitAdded}
               gitRemoved={gitRemoved}
+              gitPending={gitPending}
             />
           )}
           <div className="px-6 py-3">
