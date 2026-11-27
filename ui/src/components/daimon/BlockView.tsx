@@ -3045,11 +3045,11 @@ function BlockViewImpl({ block, modeActive = false, isPinned = false, isSelected
             : <div className="size-2 rounded-full ring-4 ring-background bg-signal" />
         }
       </div>
-      <header className="flex flex-nowrap items-center gap-x-3 min-w-0">
-        <span className="shrink-0 font-mono text-[13px] text-muted-foreground">{displayPath(block.cwd)}</span>
+      <header className="flex flex-nowrap items-start gap-x-3 min-w-0">
+        <span className="shrink-0 pt-px font-mono text-[13px] text-muted-foreground">{displayPath(block.cwd)}</span>
         <button
           onClick={() => onRerun(block.input)}
-          className={`min-w-0 truncate text-left font-mono text-[14px] font-medium underline-offset-4 hover:underline ${failed ? "text-alarm" : "text-foreground"}`}
+          className={`min-w-0 whitespace-pre-wrap break-all text-left font-mono text-[14px] font-medium underline-offset-4 hover:underline ${failed ? "text-alarm" : "text-foreground"}`}
           title={block.input}
         >
           {pm ? redactNode(block.input) : block.input}
