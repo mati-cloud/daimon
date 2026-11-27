@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.15.0](https://github.com/mati-cloud/daimon/compare/v0.14.7...v0.15.0) (2026-11-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **daemon:** WebSocket now accepts and processes SessionCommand frames (previously output-only); browser can send commands via WS without Electrobun. Port parameter moved to match unix.rs caller's arg order.
+
+### Features
+
+* **ui:** add InlineTuiBuffer to replay prompt_toolkit frames cleanly ([5813a43](https://github.com/mati-cloud/daimon/commit/5813a43ee3109eca8a5420363d94e6aa902b2cef))
+
+
+### Bug Fixes
+
+* **ui,daemon:** inline TUI text handling and scroll-into-view ([307e75d](https://github.com/mati-cloud/daimon/commit/307e75d9ac7e760198efe336c2bc8cb7c34dcc7c))
+* **ui:** allow multiline command wrapping in BlockView header ([803cc58](https://github.com/mati-cloud/daimon/commit/803cc58234db8ea9a8c57edd5759e8d6e6998996))
+* **ui:** remove xterm fallback, require WebGPU for TUI terminal ([9614e0b](https://github.com/mati-cloud/daimon/commit/9614e0b03770a3d9014c8570d15a0c6b99115f8c))
+* **ui:** resolve multiline input into single command when continuations are arguments ([f7bd00a](https://github.com/mati-cloud/daimon/commit/f7bd00a86624753791f374ad9b524a7810172d06))
+* **ws:** make WebSocket output-only, drop inbound command dispatch ([e8c83f6](https://github.com/mati-cloud/daimon/commit/e8c83f6d4e6decb3a9c76a1194fc208bbd50abc6))
+
+
+### Refactoring
+
+* **daemon:** extract dispatch fn for UNIX and WebSocket handlers ([6e958f5](https://github.com/mati-cloud/daimon/commit/6e958f50f2e3a18c0ba144aeebdeb0d81f9526b4))
+
 ## [0.14.7](https://github.com/mati-cloud/daimon/compare/v0.14.6...v0.14.7) (2026-11-25)
 
 
