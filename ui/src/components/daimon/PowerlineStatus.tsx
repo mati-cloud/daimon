@@ -4,14 +4,14 @@ import { PowerlineSegment, StatusItemSlot } from "./HeaderExtension";
 type Props = {
   gitBranch: string | null;
   gitDirty: boolean;
+  gitAhead: number;
+  gitBehind: number;
   gitAdded: number;
   gitRemoved: number;
   gitPending?: boolean;
 };
 
-// Flat, calm statusline: plugin status items, then git. Segments separated by whitespace,
-// no fills or wedges. Hidden while nothing shows (`empty:hidden`).
-export function PowerlineStatus({ gitBranch, gitDirty, gitAdded, gitRemoved, gitPending }: Props) {
+export function PowerlineStatus({ gitBranch, gitDirty, gitAhead, gitBehind, gitAdded, gitRemoved, gitPending }: Props) {
   return (
     <div className="flex items-center gap-5 px-6 pt-4 pb-1 font-mono text-[12px] leading-none empty:hidden">
       <StatusItemSlot variant="powerline" />
@@ -31,6 +31,12 @@ export function PowerlineStatus({ gitBranch, gitDirty, gitAdded, gitRemoved, git
             <span className="flex items-center gap-1.5">
               {gitAdded > 0 && <span className="text-[oklch(0.78_0.17_150)]">+{gitAdded}</span>}
               {gitRemoved > 0 && <span className="text-[oklch(0.70_0.19_25)]">−{gitRemoved}</span>}
+            </span>
+          )}
+          {(gitAhead > 0 || gitBehind > 0) && (
+            <span className="flex items-center gap-1 text-muted-foreground">
+              {gitAhead > 0 && <span>↑{gitAhead}</span>}
+              {gitBehind > 0 && <span>↓{gitBehind}</span>}
             </span>
           )}
         </PowerlineSegment>

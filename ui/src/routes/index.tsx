@@ -1449,6 +1449,8 @@ function Daimon() {
             <PowerlineStatus
               gitBranch={gitBranch}
               gitDirty={gitDirty}
+              gitAhead={gitAhead}
+              gitBehind={gitBehind}
               gitAdded={gitAdded}
               gitRemoved={gitRemoved}
               gitPending={gitPending}
