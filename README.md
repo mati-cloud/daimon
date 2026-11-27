@@ -70,6 +70,17 @@ Builds release binaries, the UI bundle and a stable Electrobun app for this mach
 
 All platforms: [Rust](https://rustup.rs) (stable, ≥ 1.86), [Bun](https://bun.sh), and Node.
 
+#### Terminal engine (wraithterm)
+
+Daimon renders its terminal with a patched fork of [wraithterm](https://github.com/betterclever/wraithterm), kept at [mati-cloud/wraithterm-patched](https://github.com/mati-cloud/wraithterm-patched). The UI depends on it by local path (`ui/package.json` → `file:../wraithterm/packages/wraith`), so it must be cloned **next to** this repo and built once before the first `dev.sh`/`build.sh`:
+
+```sh
+git clone git@github.com:mati-cloud/wraithterm-patched.git ../wraithterm
+cd ../wraithterm && bun install && bun run build:sdk
+```
+
+This produces `packages/wraith/dist`, which the UI imports. The rebuilt WebGPU/WASM engine is committed to the fork, so you do **not** need the Rust/Zig toolchain for this step — `bun run build:sdk` only compiles the TypeScript SDK. Rerun it after pulling fork changes. See the fork's README for what's patched and why.
+
 - **macOS** — `xcode-select --install`
 - **Linux (Debian/Ubuntu)** —
   ```sh
