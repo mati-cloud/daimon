@@ -10,8 +10,9 @@ pub struct CompletionItem {
 }
 
 /// `remote`: an ssh session's remote folder listing (session.rs), used instead of this disk.
-pub fn complete(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Value {
-    let suggestions = complete_with(buffer, cwd, remote);
+/// `cd_hist`: recent `cd`/`pushd` command strings from history (most-recent first).
+pub fn complete(buffer: &str, cwd: &str, remote: Option<&Listing>, cd_hist: &[String]) -> Value {
+    let suggestions = complete_with(buffer, cwd, remote, cd_hist);
     let items: Vec<CompletionItem> = suggestions
         .into_iter()
         .map(|s| CompletionItem {

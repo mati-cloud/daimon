@@ -146,7 +146,9 @@ pub async fn dispatch(cmd: SessionCommand, mgr: Arc<Mutex<SessionManager>>, db: 
                 Some(t) => mgr.lock().await.remote_listing(t, &cwd),
                 None => None,
             };
-            let data = tokio::task::spawn_blocking(move || crate::complete::complete(&buffer, &cwd, remote.as_deref())).await.unwrap_or_default();
+            let db = db.clone();
+            let cd_hist = tokio::task::spawn_blocking(move || db.cd_history(50).unwrap_or_default()).await.unwrap_or_default();
+            let data = tokio::task::spawn_blocking(move || crate::complete::complete(&buffer, &cwd, remote.as_deref(), &cd_hist)).await.unwrap_or_default();
             Some(SessionEvent::Response { req_id, ok: true, data })
         }
         SessionCommand::CommitDetail { req_id, hash, cwd } => {

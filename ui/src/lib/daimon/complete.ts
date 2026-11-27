@@ -42,10 +42,9 @@ export async function completeNative(
     replace: "token" as const,
   }));
 
-  // Drop engine results that don't start with the token (fuzzy engine returns substring/arbitrary matches)
-  const filtered = token
-    ? items.filter(s => s.value.toLowerCase().startsWith(token.toLowerCase()))
-    : items;
+  // Engine returns results already ranked: startsWith (tier 0) before contains (tier 1).
+  // No additional client-side prefix filtering needed — pass all engine results through.
+  const filtered = items;
 
   // Promote exact token match to top
   if (token) {

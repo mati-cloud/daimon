@@ -31,12 +31,14 @@ pub type Listing = [(String, bool)];
 
 /// Main entry point — given a buffer and cwd, return completions.
 pub fn complete(buffer: &str, cwd: &str) -> Vec<Suggestion> {
-    complete_with(buffer, cwd, None)
+    complete_with(buffer, cwd, None, &[])
 }
 
 /// `complete`, for a shell on another machine when `remote` is given: paths come from that
 /// listing of `cwd` (only `cwd` itself is known), and nothing reads this machine's disk or git.
-pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<Suggestion> {
+/// `cd_hist`: recent `cd`/`pushd` command strings from history (most-recent first), used to
+/// promote recently-visited dirs to the top of `cd`/`pushd` completions.
+pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>, cd_hist: &[String]) -> Vec<Suggestion> {
     let cursor = buffer.len();
     let (words, idx, partial) = tokenize(buffer, cursor);
 
@@ -54,9 +56,17 @@ pub fn complete_with(buffer: &str, cwd: &str, remote: Option<&Listing>) -> Vec<S
     }
 
     let Some(spec) = global().get(cmd) else {
-        // No spec — fall back to filesystem
+        // No spec — fall back to filesystem. cd/pushd get history-aware dir completions.
+        if (cmd == "cd" || cmd == "pushd") && idx == 1 {
+            return complete_cd(&partial, cwd, cd_hist, remote);
+        }
         return filesystem_completions(&partial, cwd, false, remote);
     };
+
+    // cd/pushd may have a spec, but we still want history-first dir completions at arg position 1.
+    if (cmd == "cd" || cmd == "pushd") && idx == 1 {
+        return complete_cd(&partial, cwd, cd_hist, remote);
+    }
 
     complete_against(spec, &words, idx, &partial, cwd, remote)
 }
@@ -259,6 +269,7 @@ fn expand_tilde(path: &str) -> std::path::PathBuf {
 /// the name prefix after it; `foo/` lists inside `foo`. Folders end in `/` (symlinks to
 /// folders too), so accepting one keeps completing inside it. Hidden entries are listed
 /// too, after the others.
+/// Matching order: startsWith(prefix) first (tier 0), then contains(prefix) (tier 1).
 fn filesystem_completions(partial: &str, cwd: &str, dirs_only: bool, remote: Option<&Listing>) -> Vec<Suggestion> {
     let (typed_dir, prefix) = match partial.rfind('/') {
         Some(i) => (&partial[..=i], &partial[i + 1..]),
@@ -277,7 +288,7 @@ fn filesystem_completions(partial: &str, cwd: &str, dirs_only: bool, remote: Opt
         let out = entries
             .iter()
             .filter(|(name, is_dir)| name.starts_with(prefix) && (*is_dir || !dirs_only))
-            .map(|(name, is_dir)| (*is_dir, name.clone()))
+            .map(|(name, is_dir)| (*is_dir, name.clone(), false))
             .collect();
         return ranked(out, typed_dir);
     }
@@ -286,37 +297,108 @@ fn filesystem_completions(partial: &str, cwd: &str, dirs_only: bool, remote: Opt
     if !base.is_dir() {
         return vec![];
     }
-    let Ok(entries) = std::fs::read_dir(&base) else { return vec![] };
+    let Ok(read) = std::fs::read_dir(&base) else { return vec![] };
 
-    let out: Vec<(bool, String)> = entries
+    // Collect all visible entries once, then split into two tiers.
+    let all: Vec<(bool, String)> = read
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().into_string().ok()?;
-            if !name.starts_with(prefix) {
-                return None;
-            }
-            // metadata() follows symlinks: a link to a folder completes like a folder.
             let is_dir = std::fs::metadata(e.path()).map(|m| m.is_dir()).unwrap_or(false);
-            if dirs_only && !is_dir {
-                return None;
-            }
+            if dirs_only && !is_dir { return None; }
             Some((is_dir, name))
         })
         .collect();
+
+    let lprefix = prefix.to_lowercase();
+    let mut out: Vec<(bool, String, bool)> = Vec::with_capacity(all.len());
+    // Tier 0: startsWith
+    for (is_dir, name) in &all {
+        if name.to_lowercase().starts_with(&lprefix) {
+            out.push((*is_dir, name.clone(), false));
+        }
+    }
+    // Tier 1: contains but not startsWith (only when prefix is non-empty)
+    if !prefix.is_empty() {
+        for (is_dir, name) in &all {
+            let lname = name.to_lowercase();
+            if !lname.starts_with(&lprefix) && lname.contains(&lprefix) {
+                out.push((*is_dir, name.clone(), true));
+            }
+        }
+    }
     ranked(out, typed_dir)
 }
 
-/// Visible entries first, then hidden ones, each by name; folders end in `/`.
-fn ranked(mut out: Vec<(bool, String)>, typed_dir: &str) -> Vec<Suggestion> {
-    out.sort_by(|a, b| (a.1.starts_with('.'), &a.1).cmp(&(b.1.starts_with('.'), &b.1)));
+/// Sort and format entries into Suggestions.
+/// Tuple: (is_dir, name, is_contains_only).
+/// Order: tier-0 (startsWith) before tier-1 (contains); hidden after visible within each tier; then alpha.
+fn ranked(mut out: Vec<(bool, String, bool)>, typed_dir: &str) -> Vec<Suggestion> {
+    out.sort_by(|a, b| {
+        (a.2, a.1.starts_with('.'), &a.1).cmp(&(b.2, b.1.starts_with('.'), &b.1))
+    });
     out.into_iter()
         .take(50)
-        .map(|(is_dir, name)| Suggestion {
+        .map(|(is_dir, name, _)| Suggestion {
             text: format!("{typed_dir}{name}{}", if is_dir { "/" } else { "" }),
             description: None,
             kind: if is_dir { SuggestionKind::Dir } else { SuggestionKind::File },
         })
         .collect()
+}
+
+/// History-aware completions for `cd` and `pushd`.
+/// Returns recently-visited dirs (from cd_hist) that match `partial`, followed by
+/// filesystem completions for dirs not already in the history results.
+fn complete_cd(partial: &str, cwd: &str, cd_hist: &[String], remote: Option<&Listing>) -> Vec<Suggestion> {
+    let lpartial = partial.to_lowercase();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut history_items: Vec<Suggestion> = Vec::new();
+
+    for cmd in cd_hist {
+        // Strip "cd " or "pushd " prefix to get the raw path.
+        let path = if let Some(p) = cmd.strip_prefix("cd ") { p.trim() }
+                   else if let Some(p) = cmd.strip_prefix("pushd ") { p.trim() }
+                   else { continue };
+
+        if path.is_empty() { continue; }
+
+        // Filter by partial prefix (case-insensitive).
+        // For a path like "projects/daimon", match the basename or the full path.
+        let display = path.trim_end_matches('/');
+        let basename = display.rsplit('/').next().unwrap_or(display);
+        let matches = if lpartial.is_empty() {
+            true
+        } else {
+            display.to_lowercase().starts_with(&lpartial) || basename.to_lowercase().starts_with(&lpartial)
+        };
+        if !matches { continue; }
+
+        // Normalise: resolve relative paths against cwd; expand ~.
+        let resolved = {
+            let p = expand_tilde(path);
+            if p.is_absolute() { p } else { Path::new(cwd).join(&p) }
+        };
+        // Only include if the directory still exists (remote sessions skip this check).
+        if remote.is_none() && !resolved.is_dir() { continue; }
+
+        // Use the path as typed (not the resolved absolute path) so the suggestion
+        // replaces the token with something the user recognises.
+        let text = format!("{}{}", display, if display.ends_with('/') { "" } else { "/" });
+        if seen.insert(text.clone()) {
+            history_items.push(Suggestion { text, description: None, kind: SuggestionKind::Dir });
+        }
+    }
+
+    // Filesystem completions for dirs not already surfaced from history.
+    let fs = filesystem_completions(partial, cwd, true, remote);
+    let mut result = history_items;
+    for s in fs {
+        if seen.insert(s.text.clone()) {
+            result.push(s);
+        }
+    }
+    result
 }
 
 #[cfg(test)]
@@ -330,7 +412,7 @@ mod fs_tests {
     #[test]
     fn completes_from_a_remote_listing_only() {
         let remote = vec![("gitlab.mati.cloud".to_string(), true), ("notes.txt".to_string(), false), (".env".to_string(), false)];
-        let texts = |b: &str| complete_with(b, "/srv", Some(&remote)).into_iter().map(|s| s.text).collect::<Vec<_>>();
+        let texts = |b: &str| complete_with(b, "/srv", Some(&remote), &[]).into_iter().map(|s| s.text).collect::<Vec<_>>();
         assert_eq!(texts("cd gi"), ["gitlab.mati.cloud/"]);
         assert_eq!(texts("cat "), ["gitlab.mati.cloud/", "notes.txt", ".env"]);
         // Only the remote cwd is known: nothing from this machine's disk.
@@ -346,7 +428,8 @@ mod fs_tests {
         let cwd = root.to_str().unwrap();
 
         assert_eq!(texts("sub/", cwd), ["sub/file.txt", "sub/inner/", "sub/.hidden"]);
-        assert_eq!(texts("sub/i", cwd), ["sub/inner/"]);
+        // "sub/i": tier-0 = inner/ (startsWith "i"); tier-1 = file.txt, .hidden (contain "i")
+        assert_eq!(texts("sub/i", cwd), ["sub/inner/", "sub/file.txt", "sub/.hidden"]);
         assert_eq!(texts("sub/.h", cwd), ["sub/.hidden"]);
         assert_eq!(texts("su", cwd), ["sub/"]);
         assert_eq!(texts(&format!("{cwd}/sub/f"), "/"), [format!("{cwd}/sub/file.txt")]);
@@ -361,6 +444,24 @@ mod fs_tests {
         assert_eq!(texts("~", "/"), ["~/"]);
         // restore so later tests that shell out to git don't inherit a removed HOME
         match prev_home { Some(h) => std::env::set_var("HOME", h), None => std::env::remove_var("HOME") }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn startswith_before_contains_in_ranked_results() {
+        let root = std::env::temp_dir().join(format!("daimon-rank-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        // Create: "projects/" (startsWith "p"), "my-project/" (contains "p" but not startsWith)
+        std::fs::create_dir(root.join("projects")).unwrap();
+        std::fs::create_dir(root.join("my-project")).unwrap();
+        let cwd = root.to_str().unwrap();
+        let result = texts("p", cwd);
+        // "projects/" must appear before "my-project/"
+        let pos_starts = result.iter().position(|t| t == "projects/");
+        let pos_contains = result.iter().position(|t| t == "my-project/");
+        assert!(pos_starts.is_some(), "projects/ missing: {result:?}");
+        assert!(pos_contains.is_some(), "my-project/ missing: {result:?}");
+        assert!(pos_starts.unwrap() < pos_contains.unwrap(), "startsWith should precede contains: {result:?}");
         std::fs::remove_dir_all(&root).unwrap();
     }
 

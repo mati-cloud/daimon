@@ -166,6 +166,18 @@ impl Store {
         Ok(rows)
     }
 
+    /// Recent `cd`/`pushd` destination paths, most-recent first, for completion.
+    pub fn cd_history(&self, limit: usize) -> Result<Vec<String>> {
+        let conn = self.0.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT cmd FROM history WHERE cmd LIKE 'cd %' OR cmd LIKE 'pushd %'
+             ORDER BY ts DESC LIMIT ?1"
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        Ok(rows)
+    }
+
     // ── Blocks ───────────────────────────────────────────────────────────────
 
     pub fn block_save(&self, b: &BlockRow) -> Result<()> {
