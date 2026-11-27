@@ -36,6 +36,33 @@ function ghostOf(top: Suggestion | undefined, token: string, input: string): str
     : "";
 }
 
+/** Returns true if a line looks like a standalone command (plain binary name, or starts with /./~/). */
+function looksLikeCommand(line: string): boolean {
+  const first = line.trimStart().split(/\s/)[0] ?? "";
+  if (!first) return false;
+  // Env-var prefix like VAR=... cmd → still a command
+  if (/^[A-Z_][A-Z0-9_]*=/.test(first)) return true;
+  // Absolute/relative path
+  if (first.startsWith("/") || first.startsWith("./") || first.startsWith("~/")) return true;
+  // Plain word with no slash = bare binary name
+  return !first.includes("/");
+}
+
+/**
+ * If the input has multiple lines and the continuation lines don't look like
+ * independent commands (e.g. they're bare path arguments), join everything
+ * with spaces into one command. Otherwise return the input unchanged so the
+ * submit handler can split it into separate blocks.
+ */
+function resolveMultiline(raw: string): string {
+  const lines = raw.split("\n").filter((l) => l.trim());
+  if (lines.length <= 1) return raw;
+  // If every line after the first doesn't look like a command, join all as one
+  const allContinuations = lines.slice(1).every((l) => !looksLikeCommand(l));
+  if (allContinuations) return lines.join(" ");
+  return raw;
+}
+
 export function Composer({
   cwd,
   ctx,
@@ -346,6 +373,23 @@ export function Composer({
         setActive((a) => (a + dir + items.length) % items.length);
         return;
       }
+      // In multiline input, only navigate history when at the first/last line boundary
+      if (value.includes("\n")) {
+        const el = inputRef.current;
+        if (el) {
+          const pos = el.selectionStart ?? 0;
+          const text = el.value;
+          if (dir === -1) {
+            // ArrowUp: only history if cursor is on the first line
+            const firstNewline = text.indexOf("\n");
+            if (firstNewline !== -1 && pos > firstNewline) return;
+          } else {
+            // ArrowDown: only history if cursor is on the last line
+            const lastNewline = text.lastIndexOf("\n");
+            if (lastNewline !== -1 && pos <= lastNewline) return;
+          }
+        }
+      }
       if (history.length) {
         e.preventDefault();
         // Freeze the prefix when navigation starts; reuse it on subsequent arrow presses
@@ -384,9 +428,10 @@ export function Composer({
       }
       e.preventDefault();
       const raw = inputRef.current?.value ?? "";
-      const cmd = raw.trim();
+      const resolved = resolveMultiline(raw);
+      const cmd = resolved.trim();
       if (!cmd) return;
-      onSubmit(cmd, raw.startsWith(" "));
+      onSubmit(cmd, resolved.startsWith(" "));
       setInputValue("");
       setHistIndex(null);
       setOpen(false);
