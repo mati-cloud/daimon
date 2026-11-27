@@ -73,6 +73,14 @@ cargo build --release --manifest-path "$ROOT/Cargo.toml" -p pty-daemon -p daimon
 
 # ── 2. UI ─────────────────────────────────────────────────────────────────────
 log "building UI..."
+# wraithterm fork (patched terminal engine) — clone next to the repo and build
+# its SDK once; the UI imports it by local path. See README > Prerequisites.
+WRAITH="$ROOT/wraithterm"
+if [ ! -f "$WRAITH/packages/wraith/dist/index.js" ]; then
+  [ -d "$WRAITH/.git" ] || (log "cloning wraithterm-patched..."; git clone git@github.com:mati-cloud/wraithterm-patched.git "$WRAITH")
+  log "building wraithterm SDK..."
+  (cd "$WRAITH" && bun install && bun run build:sdk)
+fi
 cd "$ROOT/ui"
 bun install --frozen-lockfile
 # The VT-engine wasm is optional; embed it only when it has been built.

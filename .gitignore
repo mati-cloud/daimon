@@ -38,3 +38,6 @@ shell-integration/.zcompdump
 
 # Serena
 .serena/
+
+# patched terminal engine fork — cloned here, tracked in its own repo
+/wraithterm/

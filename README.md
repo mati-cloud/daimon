@@ -72,14 +72,14 @@ All platforms: [Rust](https://rustup.rs) (stable, ≥ 1.86), [Bun](https://bun.s
 
 #### Terminal engine (wraithterm)
 
-Daimon renders its terminal with a patched fork of [wraithterm](https://github.com/betterclever/wraithterm), kept at [mati-cloud/wraithterm-patched](https://github.com/mati-cloud/wraithterm-patched). The UI depends on it by local path (`ui/package.json` → `file:../wraithterm/packages/wraith`), so it must be cloned **next to** this repo and built once before the first `dev.sh`/`build.sh`:
+Daimon renders its terminal with a patched fork of [wraithterm](https://github.com/betterclever/wraithterm), kept at [mati-cloud/wraithterm-patched](https://github.com/mati-cloud/wraithterm-patched). The UI depends on it by local path (`ui/package.json` → `file:../wraithterm/packages/wraith`), so it must be cloned into `wraithterm/` **inside** this repo and built once before the first `dev.sh`/`build.sh`:
 
 ```sh
-git clone git@github.com:mati-cloud/wraithterm-patched.git ../wraithterm
-cd ../wraithterm && bun install && bun run build:sdk
+git clone git@github.com:mati-cloud/wraithterm-patched.git wraithterm
+cd wraithterm && bun install && bun run build:sdk
 ```
 
-This produces `packages/wraith/dist`, which the UI imports. The rebuilt WebGPU/WASM engine is committed to the fork, so you do **not** need the Rust/Zig toolchain for this step — `bun run build:sdk` only compiles the TypeScript SDK. Rerun it after pulling fork changes. See the fork's README for what's patched and why.
+This produces `packages/wraith/dist`, which the UI imports. The rebuilt WebGPU/WASM engine is committed to the fork, so you do **not** need the Rust/Zig toolchain for this step — `bun run build:sdk` only compiles the TypeScript SDK. Rerun it after pulling fork changes. `dev.sh` and `build.sh` run this automatically when `wraithterm/packages/wraith/dist` is missing. See the fork's README for what's patched and why.
 
 - **macOS** — `xcode-select --install`
 - **Linux (Debian/Ubuntu)** —

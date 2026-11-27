@@ -170,6 +170,14 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 # ── JS dependencies ───────────────────────────────────────────────────────────
+# wraithterm fork (patched terminal engine) — clone next to the repo and build
+# its SDK once; the UI imports it by local path. See README > Prerequisites.
+WRAITH="$ROOT/wraithterm"
+if [ ! -f "$WRAITH/packages/wraith/dist/index.js" ]; then
+  [ -d "$WRAITH/.git" ] || (log "cloning wraithterm-patched..."; git clone git@github.com:mati-cloud/wraithterm-patched.git "$WRAITH")
+  log "building wraithterm SDK..."
+  (cd "$WRAITH" && bun install && bun run build:sdk)
+fi
 (log "installing ui deps...";  cd "$ROOT/ui"  && bun install)
 [ -d "$ROOT/app/node_modules" ] || (log "installing app deps..."; cd "$ROOT/app" && bun install)
 
