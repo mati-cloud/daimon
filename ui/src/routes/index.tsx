@@ -14,6 +14,7 @@ import { run, sendRaw, resizePty, notifyAltScreen, onAltScreenChange, onTuiChang
 import { shell, onReconnect, type AttachInfo } from "@/lib/daimon/rpc";
 import { startBench } from "@/lib/daimon/bench";
 import { inTerminal } from "@/lib/daimon/tuiTerminal";
+import { getEffectiveCombo, parseCombo, matchesCombo, subscribeKeymaps } from "@/lib/daimon/keymaps";
 import { displayPath, HOME, HOME_SEGS } from "@/lib/daimon/world";
 import { formatClock, now } from "@/lib/daimon/parse";
 import { LandingPage } from "@/components/daimon/LandingPage";
@@ -745,7 +746,7 @@ function Daimon() {
   const focusComposer = (sessionId?: string) =>
     window.dispatchEvent(new CustomEvent("focus-composer", { detail: sessionId ? { sessionId } : undefined }));
 
-  useEffect(() => { focusComposer(); }, [activeId]);
+  useEffect(() => { autoFocusComposer("tab-switch"); }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When focused pane changes, focus that pane's composer
   useEffect(() => {
@@ -984,6 +985,24 @@ function Daimon() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, sessions, historyOpen]);
+
+  // Capture-phase handler for global shortcuts that must fire even when a TUI has focus.
+  // Currently: new-session (⌘T by default, but reads the user's effective keybinding).
+  const newTabRef = useRef(newTab);
+  newTabRef.current = newTab;
+  useEffect(() => {
+    // Re-parse the combo whenever keybindings change.
+    let combo = parseCombo(getEffectiveCombo("new-session"));
+    const unsub = subscribeKeymaps(() => { combo = parseCombo(getEffectiveCombo("new-session")); });
+    const onCapture = (e: KeyboardEvent) => {
+      if (!combo || !matchesCombo(e, combo)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      newTabRef.current();
+    };
+    window.addEventListener("keydown", onCapture, { capture: true });
+    return () => { unsub(); window.removeEventListener("keydown", onCapture, { capture: true }); };
+  }, []);
 
   // Block hover shortcuts: ⌘⇧ (or ⌃⇧) + C/I/O/R/E
   // Keyboard block navigation: on mod+shift activation, auto-select a block by position;

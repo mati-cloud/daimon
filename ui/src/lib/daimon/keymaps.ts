@@ -53,6 +53,29 @@ export function getEffectiveCombo(id: string): string {
   return overrides.get(id) ?? registry.get(id)?.combo ?? "";
 }
 
+/** Parse a combo string (e.g. "⌘T", "⌘⇧ V", "Ctrl+C") into key-event fields. */
+export function parseCombo(combo: string): { mod: boolean; shift: boolean; alt: boolean; key: string } | null {
+  if (!combo) return null;
+  // Normalise: "Ctrl+C" → ctrlKey form; ⌘/⌃ → mod; ⇧ → shift; ⌥ → alt
+  const s = combo.replace(/Ctrl\+/g, "⌃").replace(/Alt\+/g, "⌥").replace(/Shift\+/g, "⇧");
+  const mod   = s.includes("⌘") || s.includes("⌃");
+  const shift = s.includes("⇧");
+  const alt   = s.includes("⌥");
+  // Strip all modifier symbols, strip whitespace, take what remains as the key.
+  const key = s.replace(/[⌘⌃⇧⌥\s]/g, "").toLowerCase();
+  if (!key) return null;
+  return { mod, shift, alt, key };
+}
+
+/** Returns true if a KeyboardEvent matches a parsed combo. */
+export function matchesCombo(e: KeyboardEvent, combo: ReturnType<typeof parseCombo>): boolean {
+  if (!combo) return false;
+  return (e.metaKey || e.ctrlKey) === combo.mod
+    && e.shiftKey === combo.shift
+    && e.altKey === combo.alt
+    && e.key.toLowerCase() === combo.key;
+}
+
 // ── Conflict detection ────────────────────────────────────────────────────────
 function buildConflictSet(pendingId?: string, pendingCombo?: string): Set<string> {
   const counts = new Map<string, string[]>(); // combo -> ids
