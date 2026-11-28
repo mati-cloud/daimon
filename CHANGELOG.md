@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/mati-cloud/daimon/compare/v0.16.2...v0.17.0) (2026-11-28)
+
+
+### Features
+
+* **tui:** add xterm (WebGL) fallback for environments without WebGPU ([b515be5](https://github.com/mati-cloud/daimon/commit/b515be5d3ff3f7aba805ff40569c78df55ca1718))
+
 ## [0.16.2](https://github.com/mati-cloud/daimon/compare/v0.16.1...v0.16.2) (2026-11-28)
 
 
