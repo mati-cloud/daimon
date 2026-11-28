@@ -66,7 +66,19 @@ index fb8dcf2a0b6d1208257e916ece0474474396e822..aeddaa17d3be46a3e36dae587e8fb60e
                  return;
              }
              if ((event.metaKey || (event.ctrlKey && event.shiftKey)) && event.key.toLowerCase() === 'v')
-@@ -1286,7 +1302,12 @@ export class Wraith {
+@@ -1275,10 +1291,12 @@ export class Wraith {
+         }, options);
+         this.input.addEventListener('focus', () => {
++            if (!this.started) return;
+             this.placeInput();
+             this.send({ type: 'focus', focused: true });
+         }, options);
+         this.input.addEventListener('blur', () => {
++            if (!this.started) return;
+             this.interceptedKeys.clear();
+             this.send({ type: 'focus', focused: false });
+         }, options);
+@@ -1286,7 +1304,12 @@ export class Wraith {
              this.send({
                  type: 'mouse',
                  action,
