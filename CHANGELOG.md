@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/mati-cloud/daimon/compare/v0.16.0...v0.16.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **session:** simplify json parsing chain, reduce intermediate conversions ([5e069dc](https://github.com/mati-cloud/daimon/commit/5e069dc62c1f3772f811dc40d8d34842496a093a))
+
 ## [0.16.0](https://github.com/mati-cloud/daimon/compare/v0.15.0...v0.16.0) (2026-11-27)
 
 
