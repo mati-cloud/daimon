@@ -530,12 +530,12 @@ impl Session {
                                 context: ctx.clone(),
                             });
                             // If the shell flagged gitPending, spawn async git fetch via mux.
-                            let pending_git = ctx.as_str()
-                                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                            let pending_git = serde_json::from_str::<serde_json::Value>(ctx.as_str())
+                                .ok()
                                 .and_then(|v| v.get("gitPending").and_then(|b| b.as_bool()))
                                 .unwrap_or(false);
-                            let cwd_for_git = ctx.as_str()
-                                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                            let cwd_for_git = serde_json::from_str::<serde_json::Value>(ctx.as_str())
+                                .ok()
                                 .and_then(|v| v.get("pwd").and_then(|p| p.as_str()).map(PathBuf::from));
                             if pending_git {
                                 if let Some(cwd_path) = cwd_for_git {
