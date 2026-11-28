@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.2](https://github.com/mati-cloud/daimon/compare/v0.16.1...v0.16.2) (2026-11-28)
+
+
+### Bug Fixes
+
+* **tui:** guard wraith focus/blur events before engine init ([070b859](https://github.com/mati-cloud/daimon/commit/070b859979b4282a1a7a76b9aaf962aa4c88fdc9))
+
 ## [0.16.1](https://github.com/mati-cloud/daimon/compare/v0.16.0...v0.16.1) (2026-11-28)
 
 
