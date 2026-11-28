@@ -34,6 +34,10 @@ pub fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+// Fields are produced by git_info() but only its *timing* is used (shell_profiling::profile_git
+// measures the git work; the daemon computes the real git context asynchronously now). Kept so
+// the profiler exercises the same parsing path a prompt would.
+#[allow(dead_code)]
 pub struct GitInfo {
     branch: String,
     dirty: bool,

@@ -1,9 +1,13 @@
 // The terminal for full-screen programs (vim, btop, less…) inside a block.
 //
-// Two engines:
+// Three engines:
 //   - Wraith (libghostty-vt + WebGPU in a worker): used for true fullscreen
-//     alt-screen apps (vim, btop, htop). Requires WebGPU; a solid opaque canvas
-//     is correct for full-pane use.
+//     alt-screen apps (vim, btop, htop) where WebGPU is available. A solid
+//     opaque canvas is correct for full-pane use.
+//   - xterm (WebGL, else DOM): fullscreen fallback where the webview has no
+//     WebGPU (macOS's WKWebView — navigator.gpu is absent there). WebGL is
+//     GPU-accelerated and runs in the main webview, so it hits the display
+//     refresh (60/120fps); the DOM renderer takes over only if WebGL is lost.
 //   - Headless (libghostty-vt parser, no GPU): used for inline interactive menus
 //     (hammer, inquirer, fzf non-fullscreen). Runs on the main thread; feeds a
 //     Uint32Array grid to TuiGrid.tsx for native DOM rendering — native selection,
@@ -11,6 +15,10 @@
 
 import { toast } from "sonner";
 import { Wraith } from "wraithterm";
+import { Terminal as XtermTerminal } from "wraithterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
+import "wraithterm/css/xterm.css";
 import { mountHeadless } from "./headlessTerminal";
 export type { GridSnapshot } from "./headlessTerminal";
 import { magnifyScale } from "./magnify";
@@ -18,7 +26,7 @@ import { magnifyScale } from "./magnify";
 type Disposable = { dispose(): void };
 
 export interface TuiTerminal {
-  readonly kind: "wraith" | "headless";
+  readonly kind: "wraith" | "webgl" | "dom" | "headless";
   readonly cols: number;
   readonly rows: number;
   write(data: string): Promise<void>;
@@ -63,8 +71,10 @@ export async function mountTui(
   }
   console.info(`[tui] mount wraith — size ${rect.width}×${rect.height}, WebGPU=${("gpu" in navigator) && window.isSecureContext}, secure=${window.isSecureContext}`);
   if (!("gpu" in navigator) || !window.isSecureContext) {
-    console.error("[tui] WebGPU unavailable — terminal will not start", { gpu: "gpu" in navigator, secure: window.isSecureContext });
-    throw new Error("WebGPU required: gpu=" + ("gpu" in navigator) + " secure=" + window.isSecureContext);
+    // No WebGPU (e.g. macOS WKWebView): fall back to xterm's WebGL renderer, which
+    // is GPU-accelerated in the main webview and hits the display refresh.
+    console.info("[tui] WebGPU unavailable — using xterm (WebGL/DOM)", { gpu: "gpu" in navigator, secure: window.isSecureContext });
+    return mountXterm(el, opts);
   }
   return mountWraith(el, opts);
 }
@@ -194,4 +204,139 @@ function sharpenOnMagnify(t: Wraith): () => void {
   window.addEventListener("daimon:magnify", onMagnify);
   if (magnifyScale() !== 1) apply(magnifyScale()); // mounted while the page is magnified
   return () => window.removeEventListener("daimon:magnify", onMagnify);
+}
+
+// ── xterm (WebGL, else DOM) ──────────────────────────────────────────────────
+// Fullscreen fallback where the webview has no WebGPU (macOS WKWebView). WebGL is
+// GPU-accelerated and renders in the main webview — no CEF, no off-screen buffer
+// copy — so it composites at the display refresh (60/120fps). The DOM renderer
+// takes over only if WebGL can't start or its context is lost.
+
+const ANSI_NAMES = [
+  "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+  "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite",
+] as const;
+
+function mountXterm(el: HTMLElement, opts: TuiOptions): TuiTerminal {
+  const ansi = Object.fromEntries(
+    ANSI_NAMES.flatMap((name, i) => (opts.theme.palette[i] ? [[name, opts.theme.palette[i]]] : [])),
+  ) as Partial<Record<(typeof ANSI_NAMES)[number], string>>;
+  const term = new XtermTerminal({
+    fontSize: opts.fontSize,
+    lineHeight: opts.lineHeight,
+    scrollback: opts.scrollback,
+    // The app's Geist Mono (a web font, already loaded for the UI); the WebGL renderer
+    // rasterizes it with the browser, so woff2 is fine here.
+    fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim() || "ui-monospace, monospace",
+    cursorBlink: true,
+    allowProposedApi: true,
+    theme: {
+      foreground: opts.theme.foreground,
+      background: opts.theme.background,
+      cursor: opts.theme.cursor,
+      ...ansi,
+    },
+  });
+  const fitAddon = new FitAddon();
+  term.loadAddon(fitAddon);
+  term.open(el);
+
+  // GPU rendering through WebGL; xterm's DOM renderer takes over if it can't start or its
+  // context is lost (GPU reset, too many contexts).
+  let kind: "webgl" | "dom" = "dom";
+  let webgl: WebglAddon | null = null;
+  const loadWebgl = () => {
+    webgl?.dispose();
+    webgl = null;
+    try {
+      const addon = new WebglAddon();
+      addon.onContextLoss(() => {
+        console.warn("[tui] WebGL context lost — using the DOM renderer");
+        addon.dispose();
+        if (webgl === addon) { webgl = null; kind = "dom"; }
+      });
+      term.loadAddon(addon);
+      webgl = addon;
+      kind = "webgl";
+    } catch (err) {
+      console.warn("[tui] WebGL renderer unavailable — using the DOM renderer:", err);
+      kind = "dom";
+    }
+  };
+  loadWebgl();
+
+  // Wraith fits itself to its host; do the same here.
+  const fit = () => {
+    if (el.clientWidth === 0 || el.clientHeight === 0) return; // hidden: keep the last size
+    try { fitAddon.fit(); } catch { /* not laid out yet */ }
+  };
+  const ro = new ResizeObserver(() => fit());
+  ro.observe(el);
+  fit();
+
+  // Track kitty keyboard protocol stack. Apps push/pop with CSI = / CSI < and enable/disable
+  // with CSI > / CSI <. When active, Shift+Enter must be encoded as \x1b[13;2u — xterm doesn't
+  // implement this protocol so we intercept and emit it ourselves.
+  let kittyDepth = 0;
+  const KITTY_PUSH_RE  = /\x1b\[=\d*u/g;  // CSI = Pu  (push)
+  const KITTY_POP_RE   = /\x1b\[<\d*u/g;  // CSI < Pu  (pop / disable-with-flags)
+  const KITTY_SET_RE   = /\x1b\[>\d*u/g;  // CSI > Pu  (set/enable — depth 0→1)
+
+  const dataListeners = new Set<(data: string) => void>();
+
+  term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+    if (kittyDepth <= 0) return true;
+    if (e.type !== "keydown") return true;
+    if (e.key === "Enter" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (e.type === "keydown") dataListeners.forEach((l) => l("\x1b[13;2u"));
+      return false; // suppress xterm's default \r
+    }
+    return true;
+  });
+
+  let disposed = false;
+  return {
+    get kind() { return kind; },
+    get cols() { return term.cols; },
+    get rows() { return term.rows; },
+    write: (data) => new Promise<void>((resolve, reject) => {
+      if (disposed) return reject(new Error("terminal disposed"));
+      // Track kitty keyboard protocol depth so Shift+Enter can be re-encoded.
+      const pushes = (data.match(KITTY_PUSH_RE) ?? []).length;
+      const pops   = (data.match(KITTY_POP_RE)  ?? []).length;
+      const sets   = (data.match(KITTY_SET_RE)   ?? []).length;
+      if (sets  > 0 && kittyDepth === 0) kittyDepth = 1;
+      kittyDepth = Math.max(0, kittyDepth + pushes - pops);
+      term.write(data, resolve);
+    }),
+    paste: (text) => { term.paste(text); return Promise.resolve(); },
+    fit,
+    focus: () => term.focus(),
+    onData: (l) => {
+      dataListeners.add(l);
+      const sub = term.onData(l);
+      return { dispose: () => { dataListeners.delete(l); sub.dispose(); } };
+    },
+    onResize: (l) => term.onResize(l),
+    onError: () => ({ dispose() {} }), // nothing asynchronous to report
+    onTitleChange: (l) => term.onTitleChange(l),
+    onBell: (l) => term.onBell(l),
+    // xterm's parser hands OSC 52 to a registered handler ("<targets>;<base64>").
+    onClipboard: (l) => term.parser.registerOscHandler(52, (data) => {
+      const b64 = data.slice(data.indexOf(";") + 1);
+      if (b64 && b64 !== "?") {
+        try { l(new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))); } catch { /* not base64 */ }
+      }
+      return true;
+    }),
+    dispose: async () => {
+      if (disposed) return;
+      disposed = true;
+      kittyDepth = 0;
+      dataListeners.clear();
+      ro.disconnect();
+      webgl?.dispose();
+      term.dispose();
+    },
+  };
 }
